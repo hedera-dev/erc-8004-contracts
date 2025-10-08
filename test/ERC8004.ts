@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { network } from "hardhat";
-import { encodeAbiParameters, getAddress, keccak256, toHex } from "viem";
+import { encodeAbiParameters, encodePacked, getAddress, keccak256, toHex } from "viem";
 
 describe("ERC8004 Registries", async function () {
   const { viem } = await network.connect();
@@ -444,6 +444,385 @@ describe("ERC8004 Registries", async function () {
         agentId, client.account.address, 0n, [responder1.account.address]
       ]);
       assert.equal(responder1Count, 1n);
+    });
+
+    it("Should verify feedbackAuth signature from agent owner", async function () {
+      const identityRegistry = await viem.deployContract("IdentityRegistry");
+      const reputationRegistry = await viem.deployContract("ReputationRegistry", [
+        identityRegistry.address,
+      ]);
+
+      const [agentOwner, client] = await viem.getWalletClients();
+
+      // Register agent (owner is agentOwner)
+      await identityRegistry.write.register(["ipfs://agent"]);
+      const agentId = 0n;
+
+      // Prepare feedbackAuth parameters
+      const chainId = BigInt(await publicClient.getChainId());
+      const indexLimit = 10n;
+      const expiry = BigInt(Math.floor(Date.now() / 1000) + 3600); // 1 hour from now
+
+      // Construct message to sign (using encodePacked to match contract's abi.encodePacked)
+      const messageHash = keccak256(
+        encodePacked(
+          ["uint256", "address", "uint64", "uint256", "uint256", "address", "address"],
+          [agentId, client.account.address, indexLimit, expiry, chainId, identityRegistry.address, agentOwner.account.address]
+        )
+      );
+
+      // Sign with agent owner's private key (EIP-191)
+      const signature = await agentOwner.signMessage({
+        message: { raw: messageHash }
+      });
+
+      // Construct feedbackAuth: (agentId, clientAddress, indexLimit, expiry, chainId, identityRegistry, signerAddress, signature)
+      // Note: signature is already a bytes value, so we encode it as bytes without re-encoding
+      const feedbackAuthEncoded = encodeAbiParameters(
+        [
+          { type: "uint256" },
+          { type: "address" },
+          { type: "uint64" },
+          { type: "uint256" },
+          { type: "uint256" },
+          { type: "address" },
+          { type: "address" }
+        ],
+        [agentId, client.account.address, indexLimit, expiry, chainId, identityRegistry.address, agentOwner.account.address]
+      );
+      // Concatenate the signature at the end
+      const feedbackAuth = (feedbackAuthEncoded + signature.slice(2)) as `0x${string}`;
+
+      // Give feedback with valid auth (as client)
+      await reputationRegistry.write.giveFeedback(
+        [
+          agentId,
+          95,
+          keccak256(toHex("quality")),
+          keccak256(toHex("service")),
+          "ipfs://feedback",
+          keccak256(toHex("content")),
+          feedbackAuth
+        ],
+        { account: client.account }
+      );
+
+      // Verify feedback was recorded
+      const feedback = await reputationRegistry.read.readFeedback([agentId, client.account.address, 0n]);
+      assert.equal(feedback[0], 95);
+    });
+
+    it("Should reject feedbackAuth with invalid signature", async function () {
+      const identityRegistry = await viem.deployContract("IdentityRegistry");
+      const reputationRegistry = await viem.deployContract("ReputationRegistry", [
+        identityRegistry.address,
+      ]);
+
+      const [agentOwner, client, attacker] = await viem.getWalletClients();
+
+      // Register agent (owner is agentOwner)
+      await identityRegistry.write.register(["ipfs://agent"]);
+      const agentId = 0n;
+
+      const chainId = BigInt(await publicClient.getChainId());
+      const indexLimit = 10n;
+      const expiry = BigInt(Math.floor(Date.now() / 1000) + 3600);
+
+      // Construct message
+      const messageHash = keccak256(
+        encodePacked(
+          ["uint256", "address", "uint64", "uint256", "uint256", "address", "address"],
+          [agentId, client.account.address, indexLimit, expiry, chainId, identityRegistry.address, agentOwner.account.address]
+        )
+      );
+
+      // Sign with ATTACKER's key (not the owner)
+      const badSignature = await attacker.signMessage({
+        message: { raw: messageHash }
+      });
+
+      // Construct feedbackAuth with bad signature
+      const feedbackAuthEncoded = encodeAbiParameters(
+        [
+          { type: "uint256" },
+          { type: "address" },
+          { type: "uint64" },
+          { type: "uint256" },
+          { type: "uint256" },
+          { type: "address" },
+          { type: "address" }
+        ],
+        [agentId, client.account.address, indexLimit, expiry, chainId, identityRegistry.address, agentOwner.account.address]
+      );
+      const feedbackAuth = (feedbackAuthEncoded + badSignature.slice(2)) as `0x${string}`;
+
+      // Should reject
+      await assert.rejects(
+        reputationRegistry.write.giveFeedback(
+          [
+            agentId,
+            95,
+            keccak256(toHex("quality")),
+            keccak256(toHex("service")),
+            "ipfs://feedback",
+            keccak256(toHex("content")),
+            feedbackAuth
+          ],
+          { account: client.account }
+        )
+      );
+    });
+
+    it("Should reject feedbackAuth signed by non-owner/non-operator", async function () {
+      const identityRegistry = await viem.deployContract("IdentityRegistry");
+      const reputationRegistry = await viem.deployContract("ReputationRegistry", [
+        identityRegistry.address,
+      ]);
+
+      const [agentOwner, client, attacker] = await viem.getWalletClients();
+
+      // Register agent (owner is agentOwner)
+      await identityRegistry.write.register(["ipfs://agent"]);
+      const agentId = 0n;
+
+      const chainId = BigInt(await publicClient.getChainId());
+      const indexLimit = 10n;
+      const expiry = BigInt(Math.floor(Date.now() / 1000) + 3600);
+
+      // Construct message claiming attacker is the signer
+      const messageHash = keccak256(
+        encodePacked(
+          ["uint256", "address", "uint64", "uint256", "uint256", "address", "address"],
+          [agentId, client.account.address, indexLimit, expiry, chainId, identityRegistry.address, attacker.account.address]
+        )
+      );
+
+      // Attacker signs correctly (signature is valid)
+      const signature = await attacker.signMessage({
+        message: { raw: messageHash }
+      });
+
+      // Construct feedbackAuth
+      const feedbackAuthEncoded = encodeAbiParameters(
+        [
+          { type: "uint256" },
+          { type: "address" },
+          { type: "uint64" },
+          { type: "uint256" },
+          { type: "uint256" },
+          { type: "address" },
+          { type: "address" }
+        ],
+        [agentId, client.account.address, indexLimit, expiry, chainId, identityRegistry.address, attacker.account.address]
+      );
+      const feedbackAuth = (feedbackAuthEncoded + signature.slice(2)) as `0x${string}`;
+
+      // Should reject because attacker is not owner/operator
+      await assert.rejects(
+        reputationRegistry.write.giveFeedback(
+          [
+            agentId,
+            95,
+            keccak256(toHex("quality")),
+            keccak256(toHex("service")),
+            "ipfs://feedback",
+            keccak256(toHex("content")),
+            feedbackAuth
+          ],
+          { account: client.account }
+        )
+      );
+    });
+
+    it("Should accept feedbackAuth from approved operator", async function () {
+      const identityRegistry = await viem.deployContract("IdentityRegistry");
+      const reputationRegistry = await viem.deployContract("ReputationRegistry", [
+        identityRegistry.address,
+      ]);
+
+      const [agentOwner, client, operator] = await viem.getWalletClients();
+
+      // Register agent
+      await identityRegistry.write.register(["ipfs://agent"]);
+      const agentId = 0n;
+
+      // Owner approves operator
+      await identityRegistry.write.setApprovalForAll([operator.account.address, true]);
+
+      const chainId = BigInt(await publicClient.getChainId());
+      const indexLimit = 10n;
+      const expiry = BigInt(Math.floor(Date.now() / 1000) + 3600);
+
+      // Operator signs the feedbackAuth
+      const messageHash = keccak256(
+        encodePacked(
+          ["uint256", "address", "uint64", "uint256", "uint256", "address", "address"],
+          [agentId, client.account.address, indexLimit, expiry, chainId, identityRegistry.address, operator.account.address]
+        )
+      );
+
+      const signature = await operator.signMessage({
+        message: { raw: messageHash }
+      });
+
+      const feedbackAuthEncoded = encodeAbiParameters(
+        [
+          { type: "uint256" },
+          { type: "address" },
+          { type: "uint64" },
+          { type: "uint256" },
+          { type: "uint256" },
+          { type: "address" },
+          { type: "address" }
+        ],
+        [agentId, client.account.address, indexLimit, expiry, chainId, identityRegistry.address, operator.account.address]
+      );
+      const feedbackAuth = (feedbackAuthEncoded + signature.slice(2)) as `0x${string}`;
+
+      // Should succeed because operator is approved
+      await reputationRegistry.write.giveFeedback(
+        [
+          agentId,
+          88,
+          keccak256(toHex("quality")),
+          keccak256(toHex("service")),
+          "ipfs://feedback",
+          keccak256(toHex("content")),
+          feedbackAuth
+        ],
+        { account: client.account }
+      );
+
+      const feedback = await reputationRegistry.read.readFeedback([agentId, client.account.address, 0n]);
+      assert.equal(feedback[0], 88);
+    });
+
+    it("Should reject expired feedbackAuth", async function () {
+      const identityRegistry = await viem.deployContract("IdentityRegistry");
+      const reputationRegistry = await viem.deployContract("ReputationRegistry", [
+        identityRegistry.address,
+      ]);
+
+      const [agentOwner, client] = await viem.getWalletClients();
+
+      await identityRegistry.write.register(["ipfs://agent"]);
+      const agentId = 0n;
+
+      const chainId = BigInt(await publicClient.getChainId());
+      const indexLimit = 10n;
+      const expiry = BigInt(Math.floor(Date.now() / 1000) - 3600); // 1 hour ago (expired)
+
+      const messageHash = keccak256(
+        encodePacked(
+          ["uint256", "address", "uint64", "uint256", "uint256", "address", "address"],
+          [agentId, client.account.address, indexLimit, expiry, chainId, identityRegistry.address, agentOwner.account.address]
+        )
+      );
+
+      const signature = await agentOwner.signMessage({
+        message: { raw: messageHash }
+      });
+
+      const feedbackAuthEncoded = encodeAbiParameters(
+        [
+          { type: "uint256" },
+          { type: "address" },
+          { type: "uint64" },
+          { type: "uint256" },
+          { type: "uint256" },
+          { type: "address" },
+          { type: "address" }
+        ],
+        [agentId, client.account.address, indexLimit, expiry, chainId, identityRegistry.address, agentOwner.account.address]
+      );
+      const feedbackAuth = (feedbackAuthEncoded + signature.slice(2)) as `0x${string}`;
+
+      // Should reject expired auth
+      await assert.rejects(
+        reputationRegistry.write.giveFeedback(
+          [
+            agentId,
+            95,
+            keccak256(toHex("quality")),
+            keccak256(toHex("service")),
+            "ipfs://feedback",
+            keccak256(toHex("content")),
+            feedbackAuth
+          ],
+          { account: client.account }
+        )
+      );
+    });
+
+    it("Should reject feedbackAuth with exceeded indexLimit", async function () {
+      const identityRegistry = await viem.deployContract("IdentityRegistry");
+      const reputationRegistry = await viem.deployContract("ReputationRegistry", [
+        identityRegistry.address,
+      ]);
+
+      const [agentOwner, client] = await viem.getWalletClients();
+
+      await identityRegistry.write.register(["ipfs://agent"]);
+      const agentId = 0n;
+
+      const chainId = BigInt(await publicClient.getChainId());
+      const indexLimit = 1n; // Only allow 1 feedback
+      const expiry = BigInt(Math.floor(Date.now() / 1000) + 3600);
+
+      const messageHash = keccak256(
+        encodePacked(
+          ["uint256", "address", "uint64", "uint256", "uint256", "address", "address"],
+          [agentId, client.account.address, indexLimit, expiry, chainId, identityRegistry.address, agentOwner.account.address]
+        )
+      );
+
+      const signature = await agentOwner.signMessage({
+        message: { raw: messageHash }
+      });
+
+      const feedbackAuthEncoded = encodeAbiParameters(
+        [
+          { type: "uint256" },
+          { type: "address" },
+          { type: "uint64" },
+          { type: "uint256" },
+          { type: "uint256" },
+          { type: "address" },
+          { type: "address" }
+        ],
+        [agentId, client.account.address, indexLimit, expiry, chainId, identityRegistry.address, agentOwner.account.address]
+      );
+      const feedbackAuth = (feedbackAuthEncoded + signature.slice(2)) as `0x${string}`;
+
+      // First feedback succeeds
+      await reputationRegistry.write.giveFeedback(
+        [
+          agentId,
+          95,
+          keccak256(toHex("quality")),
+          keccak256(toHex("service")),
+          "ipfs://feedback1",
+          keccak256(toHex("content1")),
+          feedbackAuth
+        ],
+        { account: client.account }
+      );
+
+      // Second feedback with same auth should fail (indexLimit exceeded)
+      await assert.rejects(
+        reputationRegistry.write.giveFeedback(
+          [
+            agentId,
+            90,
+            keccak256(toHex("quality")),
+            keccak256(toHex("service")),
+            "ipfs://feedback2",
+            keccak256(toHex("content2")),
+            feedbackAuth
+          ],
+          { account: client.account }
+        )
+      );
     });
   });
 

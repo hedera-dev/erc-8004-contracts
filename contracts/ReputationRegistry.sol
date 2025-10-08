@@ -5,6 +5,11 @@ import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import "@openzeppelin/contracts/interfaces/IERC1271.sol";
 
+interface IIdentityRegistry {
+    function ownerOf(uint256 tokenId) external view returns (address);
+    function isApprovedForAll(address owner, address operator) external view returns (bool);
+}
+
 /// @notice Minimal, compilable scaffold of ERC-8004 Reputation Registry.
 /// - Stores identityRegistry address
 /// - Emits NewFeedback / FeedbackRevoked / ResponseAppended
@@ -141,7 +146,13 @@ contract ReputationRegistry {
 
         require(recoveredSigner == signerAddress, "Invalid signature");
 
-        // TODO: Verify signerAddress is owner/operator of agentId in IdentityRegistry
+        // Verify signerAddress is owner or operator of agentId in IdentityRegistry
+        IIdentityRegistry registry = IIdentityRegistry(identityRegistry);
+        address owner = registry.ownerOf(authAgentId);
+        require(
+            signerAddress == owner || registry.isApprovedForAll(owner, signerAddress),
+            "Signer not authorized"
+        );
     }
 
     function revokeFeedback(uint256 agentId, uint64 feedbackIndex) external {
