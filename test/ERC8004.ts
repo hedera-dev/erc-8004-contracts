@@ -45,6 +45,55 @@ describe("ERC8004 Registries", async function () {
       assert.equal(uri3, "ipfs://agent3");
     });
 
+    /**
+     * "The tokenURI MUST resolve to the agent registration file. It MAY use any URI scheme such as ipfs://
+     * (e.g., ipfs://cid) or https:// (e.g., https://domain.com/agent3.json). When the registration data
+     * changes, it can be updated with _setTokenURI() as per ERC721URIStorage."
+     */
+    it("Should allow owner to update tokenURI", async function () {
+      const identityRegistry = await viem.deployContract("IdentityRegistry");
+      const [owner] = await viem.getWalletClients();
+
+      // Register with initial URI
+      await identityRegistry.write.register(["ipfs://initialUri"]);
+      const agentId = 0n;
+
+      // Verify initial URI
+      const initialUri = await identityRegistry.read.tokenURI([agentId]);
+      assert.equal(initialUri, "ipfs://initialUri");
+
+      // Update tokenURI
+      const newUri = "https://example.com/updated-agent.json";
+      await identityRegistry.write.setTokenURI([agentId, newUri]);
+
+      // Verify updated URI
+      const updatedUri = await identityRegistry.read.tokenURI([agentId]);
+      assert.equal(updatedUri, newUri);
+    });
+
+    /**
+     * "The tokenURI MUST resolve to the agent registration file. It MAY use any URI scheme such as ipfs://
+     * (e.g., ipfs://cid) or https:// (e.g., https://domain.com/agent3.json)."
+     */
+    it("Should support different URI schemes for tokenURI", async function () {
+      const identityRegistry = await viem.deployContract("IdentityRegistry");
+
+      // Test ipfs://
+      await identityRegistry.write.register(["ipfs://QmTestCID123"]);
+      const ipfsUri = await identityRegistry.read.tokenURI([0n]);
+      assert.equal(ipfsUri, "ipfs://QmTestCID123");
+
+      // Test https://
+      await identityRegistry.write.register(["https://domain.com/agent3.json"]);
+      const httpsUri = await identityRegistry.read.tokenURI([1n]);
+      assert.equal(httpsUri, "https://domain.com/agent3.json");
+
+      // Test http:// (should work even though spec upgrades to https)
+      await identityRegistry.write.register(["http://example.com/agent.json"]);
+      const httpUri = await identityRegistry.read.tokenURI([2n]);
+      assert.equal(httpUri, "http://example.com/agent.json");
+    });
+
     it("Should set and get metadata", async function () {
       const identityRegistry = await viem.deployContract("IdentityRegistry");
       const [owner] = await viem.getWalletClients();
@@ -103,9 +152,49 @@ describe("ERC8004 Registries", async function () {
       assert.equal(wallet, metadata[0].value);
       assert.equal(name, metadata[1].value);
     });
+
+    /**
+     * "function register() returns (uint256 agentId)
+     * // tokenURI is added later with _setTokenURI()"
+     */
+    it("Should register without tokenURI and set it later", async function () {
+      const identityRegistry = await viem.deployContract("IdentityRegistry");
+      const [owner] = await viem.getWalletClients();
+
+      // Register without tokenURI
+      await identityRegistry.write.register([]);
+      const agentId = 0n;
+
+      // Verify owner
+      const tokenOwner = await identityRegistry.read.ownerOf([agentId]);
+      assert.equal(tokenOwner.toLowerCase(), owner.account.address.toLowerCase());
+
+      // tokenURI should be empty initially
+      const initialUri = await identityRegistry.read.tokenURI([agentId]);
+      assert.equal(initialUri, "");
+
+      // Set tokenURI later
+      await identityRegistry.write.setTokenURI([agentId, "ipfs://later-set-uri"]);
+      const updatedUri = await identityRegistry.read.tokenURI([agentId]);
+      assert.equal(updatedUri, "ipfs://later-set-uri");
+    });
   });
 
   describe("ReputationRegistry", async function () {
+    /**
+     * "When the Reputation Registry is deployed, the identityRegistry address is passed to the constructor and publicly visible by calling:
+     * function getIdentityRegistry() external view returns (address identityRegistry)"
+     */
+    it("Should return the identity registry address", async function () {
+      const identityRegistry = await viem.deployContract("IdentityRegistry");
+      const reputationRegistry = await viem.deployContract("ReputationRegistry", [
+        identityRegistry.address,
+      ]);
+
+      const retrievedAddress = await reputationRegistry.read.getIdentityRegistry();
+      assert.equal(retrievedAddress.toLowerCase(), identityRegistry.address.toLowerCase());
+    });
+
     it("Should give feedback to an agent", async function () {
       const identityRegistry = await viem.deployContract("IdentityRegistry");
       const reputationRegistry = await viem.deployContract("ReputationRegistry", [
@@ -261,6 +350,32 @@ describe("ERC8004 Registries", async function () {
       assert.equal(fb2[0], 82);
     });
 
+    /**
+     * "The agentId must be a validly registered agent. The score MUST be between 0 and 100."
+     */
+    it("Should reject feedback for non-existent agent", async function () {
+      const identityRegistry = await viem.deployContract("IdentityRegistry");
+      const reputationRegistry = await viem.deployContract("ReputationRegistry", [
+        identityRegistry.address,
+      ]);
+
+      // Don't register any agent, try to give feedback to agentId 999
+      await assert.rejects(
+        reputationRegistry.write.giveFeedback([
+          999n,
+          85,
+          keccak256(toHex("tag1")),
+          keccak256(toHex("tag2")),
+          "ipfs://feedback",
+          keccak256(toHex("content")),
+          "0x",
+        ])
+      );
+    });
+
+    /**
+     * "The score MUST be between 0 and 100."
+     */
     it("Should reject score > 100", async function () {
       const identityRegistry = await viem.deployContract("IdentityRegistry");
       const reputationRegistry = await viem.deployContract("ReputationRegistry", [
@@ -280,6 +395,60 @@ describe("ERC8004 Registries", async function () {
           "0x",
         ])
       );
+    });
+
+    /**
+     * "The score MUST be between 0 and 100."
+     */
+    it("Should accept score of 0", async function () {
+      const identityRegistry = await viem.deployContract("IdentityRegistry");
+      const reputationRegistry = await viem.deployContract("ReputationRegistry", [
+        identityRegistry.address,
+      ]);
+
+      const [client] = await viem.getWalletClients();
+      await identityRegistry.write.register(["ipfs://agent"]);
+
+      // Score of 0 should be valid
+      await reputationRegistry.write.giveFeedback([
+        0n,
+        0,
+        keccak256(toHex("tag1")),
+        keccak256(toHex("tag2")),
+        "ipfs://feedback",
+        keccak256(toHex("content")),
+        "0x",
+      ]);
+
+      const feedback = await reputationRegistry.read.readFeedback([0n, client.account.address, 0n]);
+      assert.equal(feedback[0], 0);
+    });
+
+    /**
+     * "The score MUST be between 0 and 100."
+     */
+    it("Should accept score of 100", async function () {
+      const identityRegistry = await viem.deployContract("IdentityRegistry");
+      const reputationRegistry = await viem.deployContract("ReputationRegistry", [
+        identityRegistry.address,
+      ]);
+
+      const [client] = await viem.getWalletClients();
+      await identityRegistry.write.register(["ipfs://agent"]);
+
+      // Score of 100 should be valid
+      await reputationRegistry.write.giveFeedback([
+        0n,
+        100,
+        keccak256(toHex("tag1")),
+        keccak256(toHex("tag2")),
+        "ipfs://feedback",
+        keccak256(toHex("content")),
+        "0x",
+      ]);
+
+      const feedback = await reputationRegistry.read.readFeedback([0n, client.account.address, 0n]);
+      assert.equal(feedback[0], 100);
     });
 
     it("Should allow feedback without auth (empty bytes)", async function () {
@@ -444,6 +613,51 @@ describe("ERC8004 Registries", async function () {
         agentId, client.account.address, 0n, [responder1.account.address]
       ]);
       assert.equal(responder1Count, 1n);
+    });
+
+    /**
+     * "function getClients(uint256 agentId) external view returns (address[] memory)"
+     */
+    it("Should return list of clients who gave feedback", async function () {
+      const identityRegistry = await viem.deployContract("IdentityRegistry");
+      const reputationRegistry = await viem.deployContract("ReputationRegistry", [
+        identityRegistry.address,
+      ]);
+
+      const [client1, client2, client3] = await viem.getWalletClients();
+      await identityRegistry.write.register(["ipfs://agent"]);
+
+      const agentId = 0n;
+
+      // Client1 gives feedback
+      await reputationRegistry.write.giveFeedback([
+        agentId, 80, "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "0x0000000000000000000000000000000000000000000000000000000000000000", "", "0x0000000000000000000000000000000000000000000000000000000000000000", "0x"
+      ]);
+
+      // Client2 gives feedback
+      await reputationRegistry.write.giveFeedback(
+        [agentId, 90, "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "0x0000000000000000000000000000000000000000000000000000000000000000", "", "0x0000000000000000000000000000000000000000000000000000000000000000", "0x"],
+        { account: client2.account }
+      );
+
+      // Client3 gives feedback
+      await reputationRegistry.write.giveFeedback(
+        [agentId, 95, "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "0x0000000000000000000000000000000000000000000000000000000000000000", "", "0x0000000000000000000000000000000000000000000000000000000000000000", "0x"],
+        { account: client3.account }
+      );
+
+      // Get all clients
+      const clients = await reputationRegistry.read.getClients([agentId]);
+      assert.equal(clients.length, 3);
+
+      // Verify all clients are in the list
+      const clientAddresses = clients.map(addr => addr.toLowerCase());
+      assert.ok(clientAddresses.includes(client1.account.address.toLowerCase()));
+      assert.ok(clientAddresses.includes(client2.account.address.toLowerCase()));
+      assert.ok(clientAddresses.includes(client3.account.address.toLowerCase()));
     });
 
     it("Should verify feedbackAuth signature from agent owner", async function () {
@@ -1061,6 +1275,136 @@ describe("ERC8004 Registries", async function () {
         "ipfs://req",
         requestHash,
       ]);
+    });
+
+    /**
+     * "validationResponse() can be called multiple times for the same requestHash, enabling use cases like
+     * progressive validation states (e.g., \"soft finality\" and \"hard finality\" using tag) or updates to
+     * validation status."
+     */
+    it("Should allow multiple validation responses for same request", async function () {
+      const identityRegistry = await viem.deployContract("IdentityRegistry");
+      const validationRegistry = await viem.deployContract("ValidationRegistry", [
+        identityRegistry.address,
+      ]);
+
+      const [owner, validator] = await viem.getWalletClients();
+      await identityRegistry.write.register(["ipfs://agent"]);
+
+      const agentId = 0n;
+      const requestHash = keccak256(toHex("request data"));
+
+      // Create request
+      await validationRegistry.write.validationRequest([
+        validator.account.address,
+        agentId,
+        "ipfs://request",
+        requestHash,
+      ]);
+
+      // First response - soft finality
+      const softFinalityTag = keccak256(toHex("soft_finality"));
+      await validationRegistry.write.validationResponse(
+        [requestHash, 80, "ipfs://response1", keccak256(toHex("r1")), softFinalityTag],
+        { account: validator.account }
+      );
+
+      // Check first response
+      let status = await validationRegistry.read.getValidationStatus([requestHash]);
+      assert.equal(status[2], 80); // response
+      assert.equal(status[3], softFinalityTag); // tag
+
+      // Second response - hard finality (update)
+      const hardFinalityTag = keccak256(toHex("hard_finality"));
+      await validationRegistry.write.validationResponse(
+        [requestHash, 100, "ipfs://response2", keccak256(toHex("r2")), hardFinalityTag],
+        { account: validator.account }
+      );
+
+      // Check updated response
+      status = await validationRegistry.read.getValidationStatus([requestHash]);
+      assert.equal(status[2], 100); // updated response
+      assert.equal(status[3], hardFinalityTag); // updated tag
+    });
+
+    /**
+     * "When the Validation Registry is deployed, the identityRegistry address is passed to the constructor and
+     * is visible by calling getIdentityRegistry()"
+     */
+    it("Should return the identity registry address", async function () {
+      const identityRegistry = await viem.deployContract("IdentityRegistry");
+      const validationRegistry = await viem.deployContract("ValidationRegistry", [
+        identityRegistry.address,
+      ]);
+
+      const retrievedAddress = await validationRegistry.read.getIdentityRegistry();
+      assert.equal(retrievedAddress.toLowerCase(), identityRegistry.address.toLowerCase());
+    });
+
+    /**
+     * "The response is a value between 0 and 100, which can be used as binary (0 for failed, 100 for passed)
+     * or with intermediate values for validations with a spectrum of outcomes."
+     */
+    it("Should accept response of 0 (failed)", async function () {
+      const identityRegistry = await viem.deployContract("IdentityRegistry");
+      const validationRegistry = await viem.deployContract("ValidationRegistry", [
+        identityRegistry.address,
+      ]);
+
+      const [owner, validator] = await viem.getWalletClients();
+      await identityRegistry.write.register(["ipfs://agent"]);
+
+      const agentId = 0n;
+      const requestHash = keccak256(toHex("request"));
+
+      await validationRegistry.write.validationRequest([
+        validator.account.address,
+        agentId,
+        "ipfs://req",
+        requestHash,
+      ]);
+
+      // Response of 0 should be valid (failed validation)
+      await validationRegistry.write.validationResponse(
+        [requestHash, 0, "ipfs://failed", keccak256(toHex("fail")), keccak256(toHex("failed"))],
+        { account: validator.account }
+      );
+
+      const status = await validationRegistry.read.getValidationStatus([requestHash]);
+      assert.equal(status[2], 0);
+    });
+
+    /**
+     * "The response is a value between 0 and 100, which can be used as binary (0 for failed, 100 for passed)
+     * or with intermediate values for validations with a spectrum of outcomes."
+     */
+    it("Should accept intermediate response values", async function () {
+      const identityRegistry = await viem.deployContract("IdentityRegistry");
+      const validationRegistry = await viem.deployContract("ValidationRegistry", [
+        identityRegistry.address,
+      ]);
+
+      const [owner, validator] = await viem.getWalletClients();
+      await identityRegistry.write.register(["ipfs://agent"]);
+
+      const agentId = 0n;
+      const requestHash = keccak256(toHex("request"));
+
+      await validationRegistry.write.validationRequest([
+        validator.account.address,
+        agentId,
+        "ipfs://req",
+        requestHash,
+      ]);
+
+      // Intermediate value (partial validation)
+      await validationRegistry.write.validationResponse(
+        [requestHash, 67, "ipfs://partial", keccak256(toHex("partial")), keccak256(toHex("partial"))],
+        { account: validator.account }
+      );
+
+      const status = await validationRegistry.read.getValidationStatus([requestHash]);
+      assert.equal(status[2], 67);
     });
   });
 });
