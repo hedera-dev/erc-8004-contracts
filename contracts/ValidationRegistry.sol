@@ -25,6 +25,7 @@ contract ValidationRegistry {
         bytes32 indexed requestHash,
         uint8 response,
         string responseUri,
+        bytes32 responseHash,
         bytes32 tag
     );
 
@@ -32,6 +33,7 @@ contract ValidationRegistry {
         address validatorAddress;
         uint256 agentId;
         uint8 response;       // 0..100
+        bytes32 responseHash;
         bytes32 tag;
         uint256 lastUpdate;
         bool exists;
@@ -49,6 +51,10 @@ contract ValidationRegistry {
     constructor(address _identityRegistry) {
         require(_identityRegistry != address(0), "bad identity");
         identityRegistry = _identityRegistry;
+    }
+
+    function getIdentityRegistry() external view returns (address) {
+        return identityRegistry;
     }
 
     function validationRequest(
@@ -72,6 +78,7 @@ contract ValidationRegistry {
             validatorAddress: validatorAddress,
             agentId: agentId,
             response: 0,
+            responseHash: bytes32(0),
             tag: bytes32(0),
             lastUpdate: block.timestamp,
             exists: true
@@ -88,7 +95,7 @@ contract ValidationRegistry {
         bytes32 requestHash,
         uint8 response,
         string calldata responseUri,
-        bytes32 /* responseHash */,
+        bytes32 responseHash,
         bytes32 tag
     ) external {
         ValidationStatus storage s = status[requestHash];
@@ -96,9 +103,10 @@ contract ValidationRegistry {
         require(msg.sender == s.validatorAddress, "not validator");
         require(response <= 100, "resp>100");
         s.response = response;
+        s.responseHash = responseHash;
         s.tag = tag;
         s.lastUpdate = block.timestamp;
-        emit ValidationResponse(s.validatorAddress, s.agentId, requestHash, response, responseUri, tag);
+        emit ValidationResponse(s.validatorAddress, s.agentId, requestHash, response, responseUri, responseHash, tag);
     }
 
     function getValidationStatus(bytes32 requestHash)

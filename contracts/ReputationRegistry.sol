@@ -41,7 +41,8 @@ contract ReputationRegistry {
         address indexed clientAddress,
         uint64 feedbackIndex,
         address indexed responder,
-        string responseUri
+        string responseUri,
+        bytes32 responseHash
     );
 
     struct Feedback {
@@ -54,6 +55,7 @@ contract ReputationRegistry {
     struct Response {
         address responder;
         string responseUri;
+        bytes32 responseHash;
     }
 
     // agentId => client => list of feedback
@@ -62,9 +64,17 @@ contract ReputationRegistry {
     // agentId => clientAddress => feedbackIndex => list of responses
     mapping(uint256 => mapping(address => mapping(uint64 => Response[]))) private _responses;
 
+    // Track all unique clients that have given feedback for each agent
+    mapping(uint256 => address[]) private _clients;
+    mapping(uint256 => mapping(address => bool)) private _clientExists;
+
     constructor(address _identityRegistry) {
         require(_identityRegistry != address(0), "bad identity");
         identityRegistry = _identityRegistry;
+    }
+
+    function getIdentityRegistry() external view returns (address) {
+        return identityRegistry;
     }
 
     function giveFeedback(
@@ -83,6 +93,12 @@ contract ReputationRegistry {
             _verifyFeedbackAuth(agentId, msg.sender, feedbackAuth);
         }
 
+        // track new client
+        if (!_clientExists[agentId][msg.sender]) {
+            _clients[agentId].push(msg.sender);
+            _clientExists[agentId][msg.sender] = true;
+        }
+
         _feedbacks[agentId][msg.sender].push(Feedback(score, tag1, tag2, false));
         emit NewFeedback(agentId, msg.sender, score, tag1, tag2, fileuri, filehash);
     }
@@ -92,30 +108,23 @@ contract ReputationRegistry {
         address clientAddress,
         bytes calldata feedbackAuth
     ) internal view {
+        require(
+            IIdentityRegistry(identityRegistry).ownerOf(agentId) != address(0),
+            "Unregistered agent"
+        );
         // Decode feedbackAuth: (agentId, clientAddress, indexLimit, expiry, chainId, identityRegistry, signerAddress, signature)
         require(feedbackAuth.length >= 192, "Invalid auth length");
 
-        uint256 authAgentId;
-        address authClientAddress;
-        uint64 indexLimit;
-        uint256 expiry;
-        uint256 authChainId;
-        address authIdentityRegistry;
-        address signerAddress;
-        bytes memory signature;
-
-        assembly {
-            authAgentId := calldataload(feedbackAuth.offset)
-            authClientAddress := calldataload(add(feedbackAuth.offset, 32))
-            indexLimit := calldataload(add(feedbackAuth.offset, 64))
-            expiry := calldataload(add(feedbackAuth.offset, 96))
-            authChainId := calldataload(add(feedbackAuth.offset, 128))
-            authIdentityRegistry := calldataload(add(feedbackAuth.offset, 160))
-            signerAddress := calldataload(add(feedbackAuth.offset, 192))
-        }
-
-        // Extract signature (remaining bytes)
-        signature = feedbackAuth[224:];
+        (
+            uint256 authAgentId,
+            address authClientAddress,
+            uint64 indexLimit,
+            uint256 expiry,
+            uint256 authChainId,
+            address authIdentityRegistry,
+            address signerAddress,
+            bytes memory signature
+        ) = abi.decode(feedbackAuth, (uint256, address, uint64, uint256, uint256, address, address, bytes));
 
         // Verify parameters
         require(authAgentId == agentId, "AgentId mismatch");
@@ -144,7 +153,18 @@ contract ReputationRegistry {
         bytes32 ethSignedMessageHash = messageHash.toEthSignedMessageHash();
         address recoveredSigner = ethSignedMessageHash.recover(signature);
 
-        require(recoveredSigner == signerAddress, "Invalid signature");
+        // verify signature: EOA or ERC-1271 contract
+        if (recoveredSigner != signerAddress) {
+            // if signer is a contract, try ERC-1271
+            if (signerAddress.code.length == 0) {
+                revert("Invalid signature");
+            }
+            bytes4 magic = IERC1271(signerAddress).isValidSignature(
+                ethSignedMessageHash,
+                signature
+            );
+            require(magic == IERC1271.isValidSignature.selector, "Bad 1271 signature");
+        }
 
         // Verify signerAddress is owner or operator of agentId in IdentityRegistry
         IIdentityRegistry registry = IIdentityRegistry(identityRegistry);
@@ -166,17 +186,18 @@ contract ReputationRegistry {
         address clientAddress,
         uint64 feedbackIndex,
         string calldata responseUri,
-        bytes32 /* responseHash */
+        bytes32 responseHash
     ) external {
         require(feedbackIndex < _feedbacks[agentId][clientAddress].length, "index");
 
         // Store response
         _responses[agentId][clientAddress][feedbackIndex].push(Response({
             responder: msg.sender,
-            responseUri: responseUri
+            responseUri: responseUri,
+            responseHash: responseHash
         }));
 
-        emit ResponseAppended(agentId, clientAddress, feedbackIndex, msg.sender, responseUri);
+        emit ResponseAppended(agentId, clientAddress, feedbackIndex, msg.sender, responseUri, responseHash);
     }
 
     // Minimal reads for now (enough to test):
@@ -354,11 +375,6 @@ contract ReputationRegistry {
     }
 
     function getClients(uint256 agentId) external view returns (address[] memory) {
-        // Note: This is inefficient for large datasets. Consider off-chain indexing for production.
-        // For now, we need to track clients separately or iterate through known addresses.
-        // This is a simplified implementation that returns empty array.
-        // In production, you'd maintain a separate mapping or use events for indexing.
-        address[] memory empty = new address[](0);
-        return empty;
+        return _clients[agentId];
     }
 }
