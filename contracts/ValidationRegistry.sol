@@ -25,7 +25,6 @@ contract ValidationRegistry {
         bytes32 indexed requestHash,
         uint8 response,
         string responseUri,
-        bytes32 responseHash,
         bytes32 tag
     );
 
@@ -35,8 +34,8 @@ contract ValidationRegistry {
         uint8 response;       // 0..100
         bytes32 responseHash;
         bytes32 tag;
-        uint256 lastUpdate;
         bool exists;
+        uint256 lastUpdate;
     }
 
     // requestHash => status
@@ -80,8 +79,8 @@ contract ValidationRegistry {
             response: 0,
             responseHash: bytes32(0),
             tag: bytes32(0),
-            lastUpdate: block.timestamp,
-            exists: true
+            exists: true,
+            lastUpdate: block.timestamp
         });
 
         // Track for lookups
@@ -106,7 +105,7 @@ contract ValidationRegistry {
         s.responseHash = responseHash;
         s.tag = tag;
         s.lastUpdate = block.timestamp;
-        emit ValidationResponse(s.validatorAddress, s.agentId, requestHash, response, responseUri, responseHash, tag);
+        emit ValidationResponse(s.validatorAddress, s.agentId, requestHash, response, responseUri, tag);
     }
 
     function getValidationStatus(bytes32 requestHash)

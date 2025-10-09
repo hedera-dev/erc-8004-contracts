@@ -41,8 +41,7 @@ contract ReputationRegistry {
         address indexed clientAddress,
         uint64 feedbackIndex,
         address indexed responder,
-        string responseUri,
-        bytes32 responseHash
+        string responseUri
     );
 
     struct Feedback {
@@ -88,6 +87,9 @@ contract ReputationRegistry {
     ) external {
         require(score <= 100, "score>100");
 
+        // Verify agent exists
+        require(_agentExists(agentId), "Agent does not exist");
+
         // Verify feedbackAuth signature
         if (feedbackAuth.length > 0) {
             _verifyFeedbackAuth(agentId, msg.sender, feedbackAuth);
@@ -112,9 +114,11 @@ contract ReputationRegistry {
             IIdentityRegistry(identityRegistry).ownerOf(agentId) != address(0),
             "Unregistered agent"
         );
-        // Decode feedbackAuth: (agentId, clientAddress, indexLimit, expiry, chainId, identityRegistry, signerAddress, signature)
-        require(feedbackAuth.length >= 192, "Invalid auth length");
+        // Decode feedbackAuth: first 224 bytes are ABI-encoded params, rest is signature
+        // 32 + 32 + 32 + 32 + 32 + 32 + 32 = 224 bytes for 7 params
+        require(feedbackAuth.length >= 289, "Invalid auth length"); // 224 + 65 for signature
 
+        // Decode the first 224 bytes
         (
             uint256 authAgentId,
             address authClientAddress,
@@ -122,9 +126,11 @@ contract ReputationRegistry {
             uint256 expiry,
             uint256 authChainId,
             address authIdentityRegistry,
-            address signerAddress,
-            bytes memory signature
-        ) = abi.decode(feedbackAuth, (uint256, address, uint64, uint256, uint256, address, address, bytes));
+            address signerAddress
+        ) = abi.decode(feedbackAuth[:224], (uint256, address, uint64, uint256, uint256, address, address));
+
+        // Extract signature from remaining bytes
+        bytes memory signature = feedbackAuth[224:];
 
         // Verify parameters
         require(authAgentId == agentId, "AgentId mismatch");
@@ -197,7 +203,7 @@ contract ReputationRegistry {
             responseHash: responseHash
         }));
 
-        emit ResponseAppended(agentId, clientAddress, feedbackIndex, msg.sender, responseUri, responseHash);
+        emit ResponseAppended(agentId, clientAddress, feedbackIndex, msg.sender, responseUri);
     }
 
     // Minimal reads for now (enough to test):
@@ -376,5 +382,13 @@ contract ReputationRegistry {
 
     function getClients(uint256 agentId) external view returns (address[] memory) {
         return _clients[agentId];
+    }
+
+    function _agentExists(uint256 agentId) internal view returns (bool) {
+        try IIdentityRegistry(identityRegistry).ownerOf(agentId) returns (address owner) {
+            return owner != address(0);
+        } catch {
+            return false;
+        }
     }
 }
