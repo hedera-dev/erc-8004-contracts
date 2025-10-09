@@ -1,57 +1,113 @@
-# Sample Hardhat 3 Beta Project (`node:test` and `viem`)
+# ERC-8004: Trustless Agents
 
-This project showcases a Hardhat 3 Beta project using the native Node.js test runner (`node:test`) and the `viem` library for Ethereum interactions.
+Implementation of the ERC-8004 protocol for agent discovery and trust through reputation and validation.
 
-To learn more about the Hardhat 3 Beta, please visit the [Getting Started guide](https://hardhat.org/docs/getting-started#getting-started-with-hardhat-3). To share your feedback, join our [Hardhat 3 Beta](https://hardhat.org/hardhat3-beta-telegram-group) Telegram group or [open an issue](https://github.com/NomicFoundation/hardhat/issues/new) in our GitHub issue tracker.
+## About
 
-## Project Overview
+This project implements **ERC-8004**, a protocol that enables discovering, choosing, and interacting with agents across organizational boundaries without pre-existing trust. It provides three core registries:
 
-This example project includes:
+- **Identity Registry**: A minimal on-chain handle based on ERC-721 with URIStorage extension that gives every agent a portable, censorship-resistant identifier
+- **Reputation Registry**: A standard interface for posting and fetching feedback signals, enabling composable reputation systems
+- **Validation Registry**: Generic hooks for requesting and recording independent validator checks (e.g., stakers re-running jobs, zkML verifiers, TEE oracles)
 
-- A simple Hardhat configuration file.
-- Foundry-compatible Solidity unit tests.
-- TypeScript integration tests using [`node:test`](nodejs.org/api/test.html), the new Node.js native test runner, and [`viem`](https://viem.sh/).
-- Examples demonstrating how to connect to different types of networks, including locally simulating OP mainnet.
+## Project Structure
 
-## Usage
+```
+contracts/
+├── IdentityRegistry.sol     - ERC-721 based agent registration
+├── ReputationRegistry.sol   - Feedback and reputation tracking
+└── ValidationRegistry.sol   - Validation request/response system
 
-### Running Tests
+test/
+└── ERC8004.ts              - Comprehensive test suite
 
-To run all the tests in the project, execute the following command:
+ERC8004SPEC.md              - Full protocol specification
+```
 
+## Key Features
+
+### Identity Registry
+- ERC-721 NFT-based agent registration with auto-incrementing agent IDs
+- Token URI points to agent registration file (IPFS, HTTPS, etc.)
+- On-chain metadata storage for key-value pairs (e.g., agentWallet, agentName)
+- Support for metadata during registration
+
+### Reputation Registry
+- Clients can give feedback (0-100 score) with optional tags and off-chain file references
+- Pre-authorization via cryptographic signatures (`feedbackAuth`)
+- Support for feedback revocation and responses
+- On-chain aggregation (count, average score) with filtering by client addresses and tags
+- Multiple feedback entries per client-agent pair
+
+### Validation Registry
+- Agents request validation from specific validators
+- Validators respond with 0-100 scores and optional tags
+- Support for progressive validation states
+- Track all validations per agent and per validator
+- On-chain aggregation with filtering
+
+## Installation
+
+```shell
+npm install
+```
+
+## Running Tests
+
+Run all tests:
+```shell
+npm test
+```
+
+Or using Hardhat directly:
 ```shell
 npx hardhat test
 ```
 
-You can also selectively run the Solidity or `node:test` tests:
+The test suite includes comprehensive coverage of:
+- Agent registration and metadata management
+- Feedback submission, revocation, and responses
+- FeedbackAuth signature verification (EIP-191)
+- Validation requests and responses
+- Permission controls and access restrictions
+- Summary calculations with filtering
+- Edge cases and error conditions
 
-```shell
-npx hardhat test solidity
-npx hardhat test nodejs
-```
+## Development
 
-### Make a deployment to Sepolia
+This project uses:
+- **Hardhat 3** with native Node.js test runner (`node:test`)
+- **Viem** for Ethereum interactions
+- **TypeScript** for type safety
+- **OpenZeppelin Contracts** for ERC-721 implementation
 
-This project includes an example Ignition module to deploy the contract. You can deploy this module to a locally simulated chain or to Sepolia.
+## Protocol Overview
 
-To run the deployment to a local chain:
+### Agent Registration
+Each agent is uniquely identified by:
+- `namespace`: eip155 (for EVM chains)
+- `chainId`: The blockchain network identifier
+- `identityRegistry`: The registry contract address
+- `agentId`: The ERC-721 token ID
 
-```shell
-npx hardhat ignition deploy ignition/modules/Counter.ts
-```
+### Trust Models
+ERC-8004 supports three pluggable trust models:
+1. **Reputation**: Client feedback and scoring
+2. **Validation**: Stake-secured re-execution, zkML proofs, or TEE oracles
+3. **TEE Attestation**: Trusted Execution Environment verification
 
-To run the deployment to Sepolia, you need an account with funds to send the transaction. The provided Hardhat configuration includes a Configuration Variable called `SEPOLIA_PRIVATE_KEY`, which you can use to set the private key of the account you want to use.
+### Security Considerations
+- Pre-authorization mitigates unauthorized feedback but doesn't prevent Sybil attacks
+- On-chain pointers and hashes ensure immutable audit trails
+- Validator incentives and slashing managed by specific validation protocols
+- Reputation aggregation expected to evolve with off-chain services
 
-You can set the `SEPOLIA_PRIVATE_KEY` variable using the `hardhat-keystore` plugin or by setting it as an environment variable.
+## Resources
 
-To set the `SEPOLIA_PRIVATE_KEY` config variable using `hardhat-keystore`:
+- [ERC-8004 Full Specification](./ERC8004SPEC.md)
+- [Hardhat Documentation](https://hardhat.org/docs)
+- [EIP-721: Non-Fungible Token Standard](https://eips.ethereum.org/EIPS/eip-721)
 
-```shell
-npx hardhat keystore set SEPOLIA_PRIVATE_KEY
-```
+## License
 
-After setting the variable, you can run the deployment with the Sepolia network:
-
-```shell
-npx hardhat ignition deploy --network sepolia ignition/modules/Counter.ts
-```
+CC0 - Public Domain
