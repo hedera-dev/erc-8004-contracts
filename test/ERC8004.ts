@@ -212,7 +212,7 @@ describe("ERC8004 Registries", async function () {
       const [owner] = await viem.getWalletClients();
 
       // Register without tokenURI
-      await identityRegistry.write.register([]);
+      await identityRegistry.write.register();
       const agentId = 1n;
 
       // Verify owner
