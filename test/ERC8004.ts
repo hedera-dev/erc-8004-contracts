@@ -368,7 +368,7 @@ describe("ERC8004 Registries", async function () {
         ),
         reputationRegistry,
         "ResponseAppended",
-        [agentId, getAddress(client.account.address), 1n, getAddress(responder.account.address), responseUri]
+        [agentId, getAddress(client.account.address), 1n, getAddress(responder.account.address), responseUri, responseHash]
       );
     });
 
@@ -682,9 +682,9 @@ describe("ERC8004 Registries", async function () {
         { account: responder2.account }
       );
 
-      // Get response count (no filter)
+      // Get response count (with responder filter - required for counter-only model)
       const totalCount = await reputationRegistry.read.getResponseCount([
-        agentId, client.account.address, 1n, []
+        agentId, client.account.address, 1n, [responder1.account.address, responder2.account.address]
       ]);
       assert.equal(totalCount, 2n);
 
