@@ -338,7 +338,7 @@ describe("ERC8004 Registries", async function () {
         agentId,
         client.account.address,
       ]);
-      assert.equal(lastIndex, 2n); // 0, 1, 2
+      assert.equal(lastIndex, 3n); // length = 3 (indices 0, 1, 2)
 
       // Read all feedbacks
       const fb0 = await reputationRegistry.read.readFeedback([agentId, client.account.address, 0n]);
@@ -677,10 +677,18 @@ describe("ERC8004 Registries", async function () {
       const indexLimit = 10n;
       const expiry = BigInt(Math.floor(Date.now() / 1000) + 3600); // 1 hour from now
 
-      // Construct message to sign (using encodePacked to match contract's abi.encodePacked)
+      // Construct message to sign (using encodeAbiParameters to match contract's abi.encode)
       const messageHash = keccak256(
-        encodePacked(
-          ["uint256", "address", "uint64", "uint256", "uint256", "address", "address"],
+        encodeAbiParameters(
+          [
+            { type: "uint256" },
+            { type: "address" },
+            { type: "uint64" },
+            { type: "uint256" },
+            { type: "uint256" },
+            { type: "address" },
+            { type: "address" }
+          ],
           [agentId, client.account.address, indexLimit, expiry, chainId, identityRegistry.address, agentOwner.account.address]
         )
       );
@@ -744,8 +752,16 @@ describe("ERC8004 Registries", async function () {
 
       // Construct message
       const messageHash = keccak256(
-        encodePacked(
-          ["uint256", "address", "uint64", "uint256", "uint256", "address", "address"],
+        encodeAbiParameters(
+          [
+            { type: "uint256" },
+            { type: "address" },
+            { type: "uint64" },
+            { type: "uint256" },
+            { type: "uint256" },
+            { type: "address" },
+            { type: "address" }
+          ],
           [agentId, client.account.address, indexLimit, expiry, chainId, identityRegistry.address, agentOwner.account.address]
         )
       );
@@ -805,8 +821,16 @@ describe("ERC8004 Registries", async function () {
 
       // Construct message claiming attacker is the signer
       const messageHash = keccak256(
-        encodePacked(
-          ["uint256", "address", "uint64", "uint256", "uint256", "address", "address"],
+        encodeAbiParameters(
+          [
+            { type: "uint256" },
+            { type: "address" },
+            { type: "uint64" },
+            { type: "uint256" },
+            { type: "uint256" },
+            { type: "address" },
+            { type: "address" }
+          ],
           [agentId, client.account.address, indexLimit, expiry, chainId, identityRegistry.address, attacker.account.address]
         )
       );
@@ -869,8 +893,16 @@ describe("ERC8004 Registries", async function () {
 
       // Operator signs the feedbackAuth
       const messageHash = keccak256(
-        encodePacked(
-          ["uint256", "address", "uint64", "uint256", "uint256", "address", "address"],
+        encodeAbiParameters(
+          [
+            { type: "uint256" },
+            { type: "address" },
+            { type: "uint64" },
+            { type: "uint256" },
+            { type: "uint256" },
+            { type: "address" },
+            { type: "address" }
+          ],
           [agentId, client.account.address, indexLimit, expiry, chainId, identityRegistry.address, operator.account.address]
         )
       );
@@ -927,8 +959,16 @@ describe("ERC8004 Registries", async function () {
       const expiry = BigInt(Math.floor(Date.now() / 1000) - 3600); // 1 hour ago (expired)
 
       const messageHash = keccak256(
-        encodePacked(
-          ["uint256", "address", "uint64", "uint256", "uint256", "address", "address"],
+        encodeAbiParameters(
+          [
+            { type: "uint256" },
+            { type: "address" },
+            { type: "uint64" },
+            { type: "uint256" },
+            { type: "uint256" },
+            { type: "address" },
+            { type: "address" }
+          ],
           [agentId, client.account.address, indexLimit, expiry, chainId, identityRegistry.address, agentOwner.account.address]
         )
       );
@@ -984,8 +1024,16 @@ describe("ERC8004 Registries", async function () {
       const expiry = BigInt(Math.floor(Date.now() / 1000) + 3600);
 
       const messageHash = keccak256(
-        encodePacked(
-          ["uint256", "address", "uint64", "uint256", "uint256", "address", "address"],
+        encodeAbiParameters(
+          [
+            { type: "uint256" },
+            { type: "address" },
+            { type: "uint64" },
+            { type: "uint256" },
+            { type: "uint256" },
+            { type: "address" },
+            { type: "address" }
+          ],
           [agentId, client.account.address, indexLimit, expiry, chainId, identityRegistry.address, agentOwner.account.address]
         )
       );
