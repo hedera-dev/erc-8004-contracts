@@ -144,7 +144,7 @@ contract ReputationRegistry {
 
         // Construct message hash
         bytes32 messageHash = keccak256(
-            abi.encodePacked(
+            abi.encode(
                 authAgentId,
                 authClientAddress,
                 indexLimit,
@@ -206,11 +206,8 @@ contract ReputationRegistry {
         emit ResponseAppended(agentId, clientAddress, feedbackIndex, msg.sender, responseUri);
     }
 
-    // Minimal reads for now (enough to test):
     function getLastIndex(uint256 agentId, address clientAddress) external view returns (uint64) {
-        return uint64(_feedbacks[agentId][clientAddress].length == 0
-            ? 0
-            : _feedbacks[agentId][clientAddress].length - 1);
+        return uint64(_feedbacks[agentId][clientAddress].length);
     }
 
     function readFeedback(uint256 agentId, address clientAddress, uint64 index)
