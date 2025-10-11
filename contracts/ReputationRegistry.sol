@@ -139,8 +139,9 @@ contract ReputationRegistry {
         require(authChainId == block.chainid, "ChainId mismatch");
         require(authIdentityRegistry == identityRegistry, "Registry mismatch");
 
-        uint64 currentIndex = uint64(_feedbacks[agentId][clientAddress].length);
-        require(indexLimit > currentIndex, "IndexLimit exceeded");
+        // Convert to 1-indexed for comparison (current index is length + 1)
+        uint64 currentIndex = uint64(_feedbacks[agentId][clientAddress].length) + 1;
+        require(indexLimit >= currentIndex, "IndexLimit exceeded");
 
         // Construct message hash
         bytes32 messageHash = keccak256(
@@ -182,8 +183,9 @@ contract ReputationRegistry {
     }
 
     function revokeFeedback(uint256 agentId, uint64 feedbackIndex) external {
-        require(feedbackIndex < _feedbacks[agentId][msg.sender].length, "index");
-        _feedbacks[agentId][msg.sender][feedbackIndex].isRevoked = true;
+        require(feedbackIndex > 0, "index must be > 0");
+        require(feedbackIndex <= _feedbacks[agentId][msg.sender].length, "index out of bounds");
+        _feedbacks[agentId][msg.sender][feedbackIndex - 1].isRevoked = true;
         emit FeedbackRevoked(agentId, msg.sender, feedbackIndex);
     }
 
@@ -194,10 +196,11 @@ contract ReputationRegistry {
         string calldata responseUri,
         bytes32 responseHash
     ) external {
-        require(feedbackIndex < _feedbacks[agentId][clientAddress].length, "index");
+        require(feedbackIndex > 0, "index must be > 0");
+        require(feedbackIndex <= _feedbacks[agentId][clientAddress].length, "index out of bounds");
 
-        // Store response
-        _responses[agentId][clientAddress][feedbackIndex].push(Response({
+        // Store response (convert to 0-indexed for internal storage)
+        _responses[agentId][clientAddress][feedbackIndex - 1].push(Response({
             responder: msg.sender,
             responseUri: responseUri,
             responseHash: responseHash
@@ -215,7 +218,9 @@ contract ReputationRegistry {
         view
         returns (uint8 score, bytes32 tag1, bytes32 tag2, bool isRevoked)
     {
-        Feedback memory f = _feedbacks[agentId][clientAddress][index];
+        require(index > 0, "index must be > 0");
+        require(index <= _feedbacks[agentId][clientAddress].length, "index out of bounds");
+        Feedback memory f = _feedbacks[agentId][clientAddress][index - 1];
         return (f.score, f.tag1, f.tag2, f.isRevoked);
     }
 
@@ -357,7 +362,10 @@ contract ReputationRegistry {
         uint64 feedbackIndex,
         address[] calldata responders
     ) external view returns (uint64) {
-        Response[] storage responses = _responses[agentId][clientAddress][feedbackIndex];
+        require(feedbackIndex > 0, "index must be > 0");
+        require(feedbackIndex <= _feedbacks[agentId][clientAddress].length, "index out of bounds");
+
+        Response[] storage responses = _responses[agentId][clientAddress][feedbackIndex - 1];
 
         // If no responder filter, return total count
         if (responders.length == 0) {

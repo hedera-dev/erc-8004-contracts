@@ -226,11 +226,11 @@ describe("ERC8004 Registries", async function () {
         [agentId, getAddress(client.account.address), score, tag1, tag2, fileuri, filehash]
       );
 
-      // Read feedback back
+      // Read feedback back (use 1-based index)
       const feedback = await reputationRegistry.read.readFeedback([
         agentId,
         client.account.address,
-        0n,
+        1n,
       ]);
 
       assert.equal(feedback[0], score); // score
@@ -259,19 +259,19 @@ describe("ERC8004 Registries", async function () {
         "0x",
       ]);
 
-      // Revoke feedback
+      // Revoke feedback (use 1-based index)
       await viem.assertions.emitWithArgs(
-        reputationRegistry.write.revokeFeedback([agentId, 0n]),
+        reputationRegistry.write.revokeFeedback([agentId, 1n]),
         reputationRegistry,
         "FeedbackRevoked",
-        [agentId, getAddress(client.account.address), 0n]
+        [agentId, getAddress(client.account.address), 1n]
       );
 
       // Verify feedback is revoked
       const feedback = await reputationRegistry.read.readFeedback([
         agentId,
         client.account.address,
-        0n,
+        1n,
       ]);
       assert.equal(feedback[3], true); // isRevoked
     });
@@ -301,12 +301,12 @@ describe("ERC8004 Registries", async function () {
 
       await viem.assertions.emitWithArgs(
         reputationRegistry.write.appendResponse(
-          [agentId, client.account.address, 0n, responseUri, responseHash],
+          [agentId, client.account.address, 1n, responseUri, responseHash],
           { account: responder.account }
         ),
         reputationRegistry,
         "ResponseAppended",
-        [agentId, getAddress(client.account.address), 0n, getAddress(responder.account.address), responseUri]
+        [agentId, getAddress(client.account.address), 1n, getAddress(responder.account.address), responseUri]
       );
     });
 
@@ -338,12 +338,12 @@ describe("ERC8004 Registries", async function () {
         agentId,
         client.account.address,
       ]);
-      assert.equal(lastIndex, 3n); // length = 3 (indices 0, 1, 2)
+      assert.equal(lastIndex, 3n); // length = 3 (1-based indices: 1, 2, 3)
 
-      // Read all feedbacks
-      const fb0 = await reputationRegistry.read.readFeedback([agentId, client.account.address, 0n]);
-      const fb1 = await reputationRegistry.read.readFeedback([agentId, client.account.address, 1n]);
-      const fb2 = await reputationRegistry.read.readFeedback([agentId, client.account.address, 2n]);
+      // Read all feedbacks (use 1-based indices)
+      const fb0 = await reputationRegistry.read.readFeedback([agentId, client.account.address, 1n]);
+      const fb1 = await reputationRegistry.read.readFeedback([agentId, client.account.address, 2n]);
+      const fb2 = await reputationRegistry.read.readFeedback([agentId, client.account.address, 3n]);
 
       assert.equal(fb0[0], 80);
       assert.equal(fb1[0], 81);
@@ -420,7 +420,7 @@ describe("ERC8004 Registries", async function () {
         "0x",
       ]);
 
-      const feedback = await reputationRegistry.read.readFeedback([0n, client.account.address, 0n]);
+      const feedback = await reputationRegistry.read.readFeedback([0n, client.account.address, 1n]);
       assert.equal(feedback[0], 0);
     });
 
@@ -447,7 +447,7 @@ describe("ERC8004 Registries", async function () {
         "0x",
       ]);
 
-      const feedback = await reputationRegistry.read.readFeedback([0n, client.account.address, 0n]);
+      const feedback = await reputationRegistry.read.readFeedback([0n, client.account.address, 1n]);
       assert.equal(feedback[0], 100);
     });
 
@@ -470,7 +470,7 @@ describe("ERC8004 Registries", async function () {
         "0x",
       ]);
 
-      const feedback = await reputationRegistry.read.readFeedback([0n, (await viem.getWalletClients())[0].account.address, 0n]);
+      const feedback = await reputationRegistry.read.readFeedback([0n, (await viem.getWalletClients())[0].account.address, 1n]);
       assert.equal(feedback[0], 95);
     });
 
@@ -592,25 +592,25 @@ describe("ERC8004 Registries", async function () {
         "0x0000000000000000000000000000000000000000000000000000000000000000", "", "0x0000000000000000000000000000000000000000000000000000000000000000", "0x"
       ]);
 
-      // Append 2 responses from different responders
+      // Append 2 responses from different responders (use 1-based index)
       await reputationRegistry.write.appendResponse(
-        [agentId, client.account.address, 0n, "ipfs://response1", "0x0000000000000000000000000000000000000000000000000000000000000000"],
+        [agentId, client.account.address, 1n, "ipfs://response1", "0x0000000000000000000000000000000000000000000000000000000000000000"],
         { account: responder1.account }
       );
       await reputationRegistry.write.appendResponse(
-        [agentId, client.account.address, 0n, "ipfs://response2", "0x0000000000000000000000000000000000000000000000000000000000000000"],
+        [agentId, client.account.address, 1n, "ipfs://response2", "0x0000000000000000000000000000000000000000000000000000000000000000"],
         { account: responder2.account }
       );
 
       // Get response count (no filter)
       const totalCount = await reputationRegistry.read.getResponseCount([
-        agentId, client.account.address, 0n, []
+        agentId, client.account.address, 1n, []
       ]);
       assert.equal(totalCount, 2n);
 
       // Get response count (filter by responder1)
       const responder1Count = await reputationRegistry.read.getResponseCount([
-        agentId, client.account.address, 0n, [responder1.account.address]
+        agentId, client.account.address, 1n, [responder1.account.address]
       ]);
       assert.equal(responder1Count, 1n);
     });
@@ -730,7 +730,7 @@ describe("ERC8004 Registries", async function () {
       );
 
       // Verify feedback was recorded
-      const feedback = await reputationRegistry.read.readFeedback([agentId, client.account.address, 0n]);
+      const feedback = await reputationRegistry.read.readFeedback([agentId, client.account.address, 1n]);
       assert.equal(feedback[0], 95);
     });
 
@@ -939,7 +939,7 @@ describe("ERC8004 Registries", async function () {
         { account: client.account }
       );
 
-      const feedback = await reputationRegistry.read.readFeedback([agentId, client.account.address, 0n]);
+      const feedback = await reputationRegistry.read.readFeedback([agentId, client.account.address, 1n]);
       assert.equal(feedback[0], 88);
     });
 
