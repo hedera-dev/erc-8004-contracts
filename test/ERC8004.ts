@@ -17,15 +17,15 @@ describe("ERC8004 Registries", async function () {
         identityRegistry.write.register([tokenURI]),
         identityRegistry,
         "Registered",
-        [0n, tokenURI, getAddress(owner.account.address)]
+        [1n, tokenURI, getAddress(owner.account.address)]
       );
 
       // Verify tokenURI was set
-      const retrievedURI = await identityRegistry.read.tokenURI([0n]);
+      const retrievedURI = await identityRegistry.read.tokenURI([1n]);
       assert.equal(retrievedURI, tokenURI);
 
       // Verify owner
-      const tokenOwner = await identityRegistry.read.ownerOf([0n]);
+      const tokenOwner = await identityRegistry.read.ownerOf([1n]);
       assert.equal(tokenOwner.toLowerCase(), owner.account.address.toLowerCase());
     });
 
@@ -36,9 +36,9 @@ describe("ERC8004 Registries", async function () {
       await identityRegistry.write.register(["ipfs://agent2"]);
       await identityRegistry.write.register(["ipfs://agent3"]);
 
-      const uri1 = await identityRegistry.read.tokenURI([0n]);
-      const uri2 = await identityRegistry.read.tokenURI([1n]);
-      const uri3 = await identityRegistry.read.tokenURI([2n]);
+      const uri1 = await identityRegistry.read.tokenURI([1n]);
+      const uri2 = await identityRegistry.read.tokenURI([2n]);
+      const uri3 = await identityRegistry.read.tokenURI([3n]);
 
       assert.equal(uri1, "ipfs://agent1");
       assert.equal(uri2, "ipfs://agent2");
@@ -56,7 +56,7 @@ describe("ERC8004 Registries", async function () {
 
       // Register with initial URI
       await identityRegistry.write.register(["ipfs://initialUri"]);
-      const agentId = 0n;
+      const agentId = 1n;
 
       // Verify initial URI
       const initialUri = await identityRegistry.read.tokenURI([agentId]);
@@ -80,17 +80,17 @@ describe("ERC8004 Registries", async function () {
 
       // Test ipfs://
       await identityRegistry.write.register(["ipfs://QmTestCID123"]);
-      const ipfsUri = await identityRegistry.read.tokenURI([0n]);
+      const ipfsUri = await identityRegistry.read.tokenURI([1n]);
       assert.equal(ipfsUri, "ipfs://QmTestCID123");
 
       // Test https://
       await identityRegistry.write.register(["https://domain.com/agent3.json"]);
-      const httpsUri = await identityRegistry.read.tokenURI([1n]);
+      const httpsUri = await identityRegistry.read.tokenURI([2n]);
       assert.equal(httpsUri, "https://domain.com/agent3.json");
 
       // Test http:// (should work even though spec upgrades to https)
       await identityRegistry.write.register(["http://example.com/agent.json"]);
-      const httpUri = await identityRegistry.read.tokenURI([2n]);
+      const httpUri = await identityRegistry.read.tokenURI([3n]);
       assert.equal(httpUri, "http://example.com/agent.json");
     });
 
@@ -99,7 +99,7 @@ describe("ERC8004 Registries", async function () {
       const [owner] = await viem.getWalletClients();
 
       await identityRegistry.write.register(["ipfs://agent"]);
-      const agentId = 0n;
+      const agentId = 1n;
 
       const key = "agentWallet";
       const value = toHex("0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb7");
@@ -122,7 +122,7 @@ describe("ERC8004 Registries", async function () {
       const [owner, attacker] = await viem.getWalletClients();
 
       await identityRegistry.write.register(["ipfs://agent"]);
-      const agentId = 0n;
+      const agentId = 1n;
 
       // Try to set metadata as non-owner
       await assert.rejects(
@@ -146,8 +146,8 @@ describe("ERC8004 Registries", async function () {
       const hash = await identityRegistry.write.register([tokenURI, metadata]);
 
       // Verify metadata was set
-      const wallet = await identityRegistry.read.getMetadata([0n, "agentWallet"]);
-      const name = await identityRegistry.read.getMetadata([0n, "agentName"]);
+      const wallet = await identityRegistry.read.getMetadata([1n, "agentWallet"]);
+      const name = await identityRegistry.read.getMetadata([1n, "agentName"]);
 
       assert.equal(wallet, metadata[0].value);
       assert.equal(name, metadata[1].value);
@@ -163,7 +163,7 @@ describe("ERC8004 Registries", async function () {
 
       // Register without tokenURI
       await identityRegistry.write.register([]);
-      const agentId = 0n;
+      const agentId = 1n;
 
       // Verify owner
       const tokenOwner = await identityRegistry.read.ownerOf([agentId]);
@@ -204,7 +204,7 @@ describe("ERC8004 Registries", async function () {
       const [client] = await viem.getWalletClients();
       await identityRegistry.write.register(["ipfs://agent"]);
 
-      const agentId = 0n;
+      const agentId = 1n;
       const score = 85;
       const tag1 = keccak256(toHex("quality"));
       const tag2 = keccak256(toHex("speed"));
@@ -248,7 +248,7 @@ describe("ERC8004 Registries", async function () {
       const [client] = await viem.getWalletClients();
       await identityRegistry.write.register(["ipfs://agent"]);
 
-      const agentId = 0n;
+      const agentId = 1n;
       await reputationRegistry.write.giveFeedback([
         agentId,
         90,
@@ -285,7 +285,7 @@ describe("ERC8004 Registries", async function () {
       const [client, responder] = await viem.getWalletClients();
       await identityRegistry.write.register(["ipfs://agent"]);
 
-      const agentId = 0n;
+      const agentId = 1n;
       await reputationRegistry.write.giveFeedback([
         agentId,
         75,
@@ -319,7 +319,7 @@ describe("ERC8004 Registries", async function () {
       const [client] = await viem.getWalletClients();
       await identityRegistry.write.register(["ipfs://agent"]);
 
-      const agentId = 0n;
+      const agentId = 1n;
 
       // Give 3 feedbacks
       for (let i = 0; i < 3; i++) {
@@ -411,7 +411,7 @@ describe("ERC8004 Registries", async function () {
 
       // Score of 0 should be valid
       await reputationRegistry.write.giveFeedback([
-        0n,
+        1n,
         0,
         keccak256(toHex("tag1")),
         keccak256(toHex("tag2")),
@@ -420,7 +420,7 @@ describe("ERC8004 Registries", async function () {
         "0x",
       ]);
 
-      const feedback = await reputationRegistry.read.readFeedback([0n, client.account.address, 1n]);
+      const feedback = await reputationRegistry.read.readFeedback([1n, client.account.address, 1n]);
       assert.equal(feedback[0], 0);
     });
 
@@ -438,7 +438,7 @@ describe("ERC8004 Registries", async function () {
 
       // Score of 100 should be valid
       await reputationRegistry.write.giveFeedback([
-        0n,
+        1n,
         100,
         keccak256(toHex("tag1")),
         keccak256(toHex("tag2")),
@@ -447,7 +447,7 @@ describe("ERC8004 Registries", async function () {
         "0x",
       ]);
 
-      const feedback = await reputationRegistry.read.readFeedback([0n, client.account.address, 1n]);
+      const feedback = await reputationRegistry.read.readFeedback([1n, client.account.address, 1n]);
       assert.equal(feedback[0], 100);
     });
 
@@ -461,7 +461,7 @@ describe("ERC8004 Registries", async function () {
 
       // Empty auth should be accepted
       await reputationRegistry.write.giveFeedback([
-        0n,
+        1n,
         95,
         keccak256(toHex("tag1")),
         keccak256(toHex("tag2")),
@@ -470,7 +470,7 @@ describe("ERC8004 Registries", async function () {
         "0x",
       ]);
 
-      const feedback = await reputationRegistry.read.readFeedback([0n, (await viem.getWalletClients())[0].account.address, 1n]);
+      const feedback = await reputationRegistry.read.readFeedback([1n, (await viem.getWalletClients())[0].account.address, 1n]);
       assert.equal(feedback[0], 95);
     });
 
@@ -483,7 +483,7 @@ describe("ERC8004 Registries", async function () {
       const [client1, client2] = await viem.getWalletClients();
       await identityRegistry.write.register(["ipfs://agent"]);
 
-      const agentId = 0n;
+      const agentId = 1n;
       const tag1 = keccak256(toHex("service"));
       const tag2 = keccak256(toHex("fast"));
 
@@ -522,7 +522,7 @@ describe("ERC8004 Registries", async function () {
       const [client] = await viem.getWalletClients();
       await identityRegistry.write.register(["ipfs://agent"]);
 
-      const agentId = 0n;
+      const agentId = 1n;
       const tagA = keccak256(toHex("tagA"));
       const tagB = keccak256(toHex("tagB"));
       const tagC = keccak256(toHex("tagC"));
@@ -547,7 +547,7 @@ describe("ERC8004 Registries", async function () {
       const [client1, client2] = await viem.getWalletClients();
       await identityRegistry.write.register(["ipfs://agent"]);
 
-      const agentId = 0n;
+      const agentId = 1n;
       const tag1 = keccak256(toHex("quality"));
 
       // Client1: 2 feedbacks
@@ -584,7 +584,7 @@ describe("ERC8004 Registries", async function () {
       const [client, responder1, responder2] = await viem.getWalletClients();
       await identityRegistry.write.register(["ipfs://agent"]);
 
-      const agentId = 0n;
+      const agentId = 1n;
 
       // Give feedback
       await reputationRegistry.write.giveFeedback([
@@ -627,7 +627,7 @@ describe("ERC8004 Registries", async function () {
       const [client1, client2, client3] = await viem.getWalletClients();
       await identityRegistry.write.register(["ipfs://agent"]);
 
-      const agentId = 0n;
+      const agentId = 1n;
 
       // Client1 gives feedback
       await reputationRegistry.write.giveFeedback([
@@ -670,7 +670,7 @@ describe("ERC8004 Registries", async function () {
 
       // Register agent (owner is agentOwner)
       await identityRegistry.write.register(["ipfs://agent"]);
-      const agentId = 0n;
+      const agentId = 1n;
 
       // Prepare feedbackAuth parameters
       const chainId = BigInt(await publicClient.getChainId());
@@ -744,7 +744,7 @@ describe("ERC8004 Registries", async function () {
 
       // Register agent (owner is agentOwner)
       await identityRegistry.write.register(["ipfs://agent"]);
-      const agentId = 0n;
+      const agentId = 1n;
 
       const chainId = BigInt(await publicClient.getChainId());
       const indexLimit = 10n;
@@ -813,7 +813,7 @@ describe("ERC8004 Registries", async function () {
 
       // Register agent (owner is agentOwner)
       await identityRegistry.write.register(["ipfs://agent"]);
-      const agentId = 0n;
+      const agentId = 1n;
 
       const chainId = BigInt(await publicClient.getChainId());
       const indexLimit = 10n;
@@ -882,7 +882,7 @@ describe("ERC8004 Registries", async function () {
 
       // Register agent
       await identityRegistry.write.register(["ipfs://agent"]);
-      const agentId = 0n;
+      const agentId = 1n;
 
       // Owner approves operator
       await identityRegistry.write.setApprovalForAll([operator.account.address, true]);
@@ -952,7 +952,7 @@ describe("ERC8004 Registries", async function () {
       const [agentOwner, client] = await viem.getWalletClients();
 
       await identityRegistry.write.register(["ipfs://agent"]);
-      const agentId = 0n;
+      const agentId = 1n;
 
       const chainId = BigInt(await publicClient.getChainId());
       const indexLimit = 10n;
@@ -1017,7 +1017,7 @@ describe("ERC8004 Registries", async function () {
       const [agentOwner, client] = await viem.getWalletClients();
 
       await identityRegistry.write.register(["ipfs://agent"]);
-      const agentId = 0n;
+      const agentId = 1n;
 
       const chainId = BigInt(await publicClient.getChainId());
       const indexLimit = 1n; // Only allow 1 feedback
@@ -1098,7 +1098,7 @@ describe("ERC8004 Registries", async function () {
       const [owner, validator] = await viem.getWalletClients();
       await identityRegistry.write.register(["ipfs://agent"]);
 
-      const agentId = 0n;
+      const agentId = 1n;
       const requestUri = "ipfs://validation-request";
       const requestHash = keccak256(toHex("request data"));
 
@@ -1131,7 +1131,7 @@ describe("ERC8004 Registries", async function () {
       const [owner, validator] = await viem.getWalletClients();
       await identityRegistry.write.register(["ipfs://agent"]);
 
-      const agentId = 0n;
+      const agentId = 1n;
       const requestUri = "ipfs://validation-request";
       const requestHash = keccak256(toHex("request data"));
 
@@ -1174,7 +1174,7 @@ describe("ERC8004 Registries", async function () {
       const [owner, validator] = await viem.getWalletClients();
       await identityRegistry.write.register(["ipfs://agent"]);
 
-      const agentId = 0n;
+      const agentId = 1n;
       const requestUri = "ipfs://validation-request";
       const requestHash = keccak256(toHex("request data"));
 
@@ -1205,7 +1205,7 @@ describe("ERC8004 Registries", async function () {
       const [owner, validator, attacker] = await viem.getWalletClients();
       await identityRegistry.write.register(["ipfs://agent"]);
 
-      const agentId = 0n;
+      const agentId = 1n;
       const requestUri = "ipfs://validation-request";
       const requestHash = keccak256(toHex("request data"));
 
@@ -1234,7 +1234,7 @@ describe("ERC8004 Registries", async function () {
       const [owner, validator] = await viem.getWalletClients();
       await identityRegistry.write.register(["ipfs://agent"]);
 
-      const agentId = 0n;
+      const agentId = 1n;
       const requestHash = keccak256(toHex("request data"));
 
       await validationRegistry.write.validationRequest([
@@ -1261,7 +1261,7 @@ describe("ERC8004 Registries", async function () {
       const [owner, validator1, validator2] = await viem.getWalletClients();
       await identityRegistry.write.register(["ipfs://agent"]);
 
-      const agentId = 0n;
+      const agentId = 1n;
       const tag = keccak256(toHex("quality"));
 
       // Create 2 validation requests
@@ -1305,7 +1305,7 @@ describe("ERC8004 Registries", async function () {
       const [owner, attacker, validator] = await viem.getWalletClients();
       await identityRegistry.write.register(["ipfs://agent"]);
 
-      const agentId = 0n;
+      const agentId = 1n;
       const requestHash = keccak256(toHex("request"));
 
       // Attacker tries to request validation for someone else's agent
@@ -1339,7 +1339,7 @@ describe("ERC8004 Registries", async function () {
       const [owner, validator] = await viem.getWalletClients();
       await identityRegistry.write.register(["ipfs://agent"]);
 
-      const agentId = 0n;
+      const agentId = 1n;
       const requestHash = keccak256(toHex("request data"));
 
       // Create request
@@ -1402,7 +1402,7 @@ describe("ERC8004 Registries", async function () {
       const [owner, validator] = await viem.getWalletClients();
       await identityRegistry.write.register(["ipfs://agent"]);
 
-      const agentId = 0n;
+      const agentId = 1n;
       const requestHash = keccak256(toHex("request"));
 
       await validationRegistry.write.validationRequest([
@@ -1435,7 +1435,7 @@ describe("ERC8004 Registries", async function () {
       const [owner, validator] = await viem.getWalletClients();
       await identityRegistry.write.register(["ipfs://agent"]);
 
-      const agentId = 0n;
+      const agentId = 1n;
       const requestHash = keccak256(toHex("request"));
 
       await validationRegistry.write.validationRequest([
