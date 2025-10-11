@@ -91,9 +91,7 @@ contract ReputationRegistry {
         require(_agentExists(agentId), "Agent does not exist");
 
         // Verify feedbackAuth signature
-        if (feedbackAuth.length > 0) {
-            _verifyFeedbackAuth(agentId, msg.sender, feedbackAuth);
-        }
+        _verifyFeedbackAuth(agentId, msg.sender, feedbackAuth);
 
         // track new client
         if (!_clientExists[agentId][msg.sender]) {

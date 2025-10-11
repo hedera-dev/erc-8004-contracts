@@ -7,6 +7,56 @@ describe("ERC8004 Registries", async function () {
   const { viem } = await network.connect();
   const publicClient = await viem.getPublicClient();
 
+  // Helper function to create signed feedbackAuth
+  async function createFeedbackAuth(
+    agentId: bigint,
+    clientAddress: `0x${string}`,
+    identityRegistryAddress: `0x${string}`,
+    signer: any
+  ) {
+    const chainId = BigInt(await publicClient.getChainId());
+    const indexLimit = 100n; // Allow up to 100 feedback submissions
+    const expiry = BigInt(Math.floor(Date.now() / 1000) + 3600); // 1 hour from now
+
+    // Construct message to sign (using encodeAbiParameters to match contract's abi.encode)
+    const messageHash = keccak256(
+      encodeAbiParameters(
+        [
+          { type: "uint256" },
+          { type: "address" },
+          { type: "uint64" },
+          { type: "uint256" },
+          { type: "uint256" },
+          { type: "address" },
+          { type: "address" }
+        ],
+        [agentId, clientAddress, indexLimit, expiry, chainId, identityRegistryAddress, signer.account.address]
+      )
+    );
+
+    // Sign with signer's private key (EIP-191)
+    const signature = await signer.signMessage({
+      message: { raw: messageHash }
+    });
+
+    // Construct feedbackAuth
+    const feedbackAuthEncoded = encodeAbiParameters(
+      [
+        { type: "uint256" },
+        { type: "address" },
+        { type: "uint64" },
+        { type: "uint256" },
+        { type: "uint256" },
+        { type: "address" },
+        { type: "address" }
+      ],
+      [agentId, clientAddress, indexLimit, expiry, chainId, identityRegistryAddress, signer.account.address]
+    );
+
+    // Concatenate the signature at the end
+    return (feedbackAuthEncoded + signature.slice(2)) as `0x${string}`;
+  }
+
   describe("IdentityRegistry", async function () {
     it("Should register an agent with tokenURI", async function () {
       const identityRegistry = await viem.deployContract("IdentityRegistry");
@@ -201,8 +251,8 @@ describe("ERC8004 Registries", async function () {
         identityRegistry.address,
       ]);
 
-      const [client] = await viem.getWalletClients();
-      await identityRegistry.write.register(["ipfs://agent"]);
+      const [agentOwner, client] = await viem.getWalletClients();
+      await identityRegistry.write.register(["ipfs://agent"], { account: agentOwner.account });
 
       const agentId = 1n;
       const score = 85;
@@ -210,6 +260,14 @@ describe("ERC8004 Registries", async function () {
       const tag2 = keccak256(toHex("speed"));
       const fileuri = "ipfs://feedback1";
       const filehash = keccak256(toHex("feedback content"));
+
+      // Create signed feedbackAuth
+      const feedbackAuth = await createFeedbackAuth(
+        agentId,
+        client.account.address,
+        identityRegistry.address,
+        agentOwner
+      );
 
       await viem.assertions.emitWithArgs(
         reputationRegistry.write.giveFeedback([
@@ -219,8 +277,8 @@ describe("ERC8004 Registries", async function () {
           tag2,
           fileuri,
           filehash,
-          "0x", // feedbackAuth not verified yet
-        ]),
+          feedbackAuth,
+        ], { account: client.account }),
         reputationRegistry,
         "NewFeedback",
         [agentId, getAddress(client.account.address), score, tag1, tag2, fileuri, filehash]
@@ -245,10 +303,12 @@ describe("ERC8004 Registries", async function () {
         identityRegistry.address,
       ]);
 
-      const [client] = await viem.getWalletClients();
-      await identityRegistry.write.register(["ipfs://agent"]);
+      const [agentOwner, client] = await viem.getWalletClients();
+      await identityRegistry.write.register(["ipfs://agent"], { account: agentOwner.account });
 
       const agentId = 1n;
+      const feedbackAuth = await createFeedbackAuth(agentId, client.account.address, identityRegistry.address, agentOwner);
+
       await reputationRegistry.write.giveFeedback([
         agentId,
         90,
@@ -256,12 +316,12 @@ describe("ERC8004 Registries", async function () {
         keccak256(toHex("tag2")),
         "ipfs://feedback",
         keccak256(toHex("content")),
-        "0x",
-      ]);
+        feedbackAuth,
+      ], { account: client.account });
 
-      // Revoke feedback (use 1-based index)
+      // Revoke feedback (use 1-based index) - must be called by the client who gave feedback
       await viem.assertions.emitWithArgs(
-        reputationRegistry.write.revokeFeedback([agentId, 1n]),
+        reputationRegistry.write.revokeFeedback([agentId, 1n], { account: client.account }),
         reputationRegistry,
         "FeedbackRevoked",
         [agentId, getAddress(client.account.address), 1n]
@@ -282,10 +342,12 @@ describe("ERC8004 Registries", async function () {
         identityRegistry.address,
       ]);
 
-      const [client, responder] = await viem.getWalletClients();
-      await identityRegistry.write.register(["ipfs://agent"]);
+      const [agentOwner, client, responder] = await viem.getWalletClients();
+      await identityRegistry.write.register(["ipfs://agent"], { account: agentOwner.account });
 
       const agentId = 1n;
+      const feedbackAuth = await createFeedbackAuth(agentId, client.account.address, identityRegistry.address, agentOwner);
+
       await reputationRegistry.write.giveFeedback([
         agentId,
         75,
@@ -293,8 +355,8 @@ describe("ERC8004 Registries", async function () {
         keccak256(toHex("tag2")),
         "ipfs://feedback",
         keccak256(toHex("content")),
-        "0x",
-      ]);
+        feedbackAuth,
+      ], { account: client.account });
 
       const responseUri = "ipfs://response1";
       const responseHash = keccak256(toHex("response content"));
@@ -316,10 +378,11 @@ describe("ERC8004 Registries", async function () {
         identityRegistry.address,
       ]);
 
-      const [client] = await viem.getWalletClients();
-      await identityRegistry.write.register(["ipfs://agent"]);
+      const [agentOwner, client] = await viem.getWalletClients();
+      await identityRegistry.write.register(["ipfs://agent"], { account: agentOwner.account });
 
       const agentId = 1n;
+      const feedbackAuth = await createFeedbackAuth(agentId, client.account.address, identityRegistry.address, agentOwner);
 
       // Give 3 feedbacks
       for (let i = 0; i < 3; i++) {
@@ -330,8 +393,8 @@ describe("ERC8004 Registries", async function () {
           keccak256(toHex("tag2")),
           `ipfs://feedback${i}`,
           keccak256(toHex(`content${i}`)),
-          "0x",
-        ]);
+          feedbackAuth,
+        ], { account: client.account });
       }
 
       const lastIndex = await reputationRegistry.read.getLastIndex([
@@ -406,21 +469,24 @@ describe("ERC8004 Registries", async function () {
         identityRegistry.address,
       ]);
 
-      const [client] = await viem.getWalletClients();
-      await identityRegistry.write.register(["ipfs://agent"]);
+      const [agentOwner, client] = await viem.getWalletClients();
+      await identityRegistry.write.register(["ipfs://agent"], { account: agentOwner.account });
+
+      const agentId = 1n;
+      const feedbackAuth = await createFeedbackAuth(agentId, client.account.address, identityRegistry.address, agentOwner);
 
       // Score of 0 should be valid
       await reputationRegistry.write.giveFeedback([
-        1n,
+        agentId,
         0,
         keccak256(toHex("tag1")),
         keccak256(toHex("tag2")),
         "ipfs://feedback",
         keccak256(toHex("content")),
-        "0x",
-      ]);
+        feedbackAuth,
+      ], { account: client.account });
 
-      const feedback = await reputationRegistry.read.readFeedback([1n, client.account.address, 1n]);
+      const feedback = await reputationRegistry.read.readFeedback([agentId, client.account.address, 1n]);
       assert.equal(feedback[0], 0);
     });
 
@@ -433,25 +499,28 @@ describe("ERC8004 Registries", async function () {
         identityRegistry.address,
       ]);
 
-      const [client] = await viem.getWalletClients();
-      await identityRegistry.write.register(["ipfs://agent"]);
+      const [agentOwner, client] = await viem.getWalletClients();
+      await identityRegistry.write.register(["ipfs://agent"], { account: agentOwner.account });
+
+      const agentId = 1n;
+      const feedbackAuth = await createFeedbackAuth(agentId, client.account.address, identityRegistry.address, agentOwner);
 
       // Score of 100 should be valid
       await reputationRegistry.write.giveFeedback([
-        1n,
+        agentId,
         100,
         keccak256(toHex("tag1")),
         keccak256(toHex("tag2")),
         "ipfs://feedback",
         keccak256(toHex("content")),
-        "0x",
-      ]);
+        feedbackAuth,
+      ], { account: client.account });
 
-      const feedback = await reputationRegistry.read.readFeedback([1n, client.account.address, 1n]);
+      const feedback = await reputationRegistry.read.readFeedback([agentId, client.account.address, 1n]);
       assert.equal(feedback[0], 100);
     });
 
-    it("Should allow feedback without auth (empty bytes)", async function () {
+    it("Should reject feedback without auth (empty bytes)", async function () {
       const identityRegistry = await viem.deployContract("IdentityRegistry");
       const reputationRegistry = await viem.deployContract("ReputationRegistry", [
         identityRegistry.address,
@@ -459,19 +528,21 @@ describe("ERC8004 Registries", async function () {
 
       await identityRegistry.write.register(["ipfs://agent"]);
 
-      // Empty auth should be accepted
-      await reputationRegistry.write.giveFeedback([
-        1n,
-        95,
-        keccak256(toHex("tag1")),
-        keccak256(toHex("tag2")),
-        "ipfs://feedback",
-        keccak256(toHex("content")),
-        "0x",
-      ]);
-
-      const feedback = await reputationRegistry.read.readFeedback([1n, (await viem.getWalletClients())[0].account.address, 1n]);
-      assert.equal(feedback[0], 95);
+      // Empty auth should be REJECTED (feedbackAuth is mandatory)
+      await assert.rejects(
+        async () => {
+          await reputationRegistry.write.giveFeedback([
+            1n,
+            95,
+            keccak256(toHex("tag1")),
+            keccak256(toHex("tag2")),
+            "ipfs://feedback",
+            keccak256(toHex("content")),
+            "0x",
+          ]);
+        },
+        /Invalid auth data length|revert/
+      );
     });
 
     it("Should calculate summary with average score", async function () {
@@ -480,24 +551,27 @@ describe("ERC8004 Registries", async function () {
         identityRegistry.address,
       ]);
 
-      const [client1, client2] = await viem.getWalletClients();
-      await identityRegistry.write.register(["ipfs://agent"]);
+      const [agentOwner, client1, client2] = await viem.getWalletClients();
+      await identityRegistry.write.register(["ipfs://agent"], { account: agentOwner.account });
 
       const agentId = 1n;
       const tag1 = keccak256(toHex("service"));
       const tag2 = keccak256(toHex("fast"));
 
+      const feedbackAuth1 = await createFeedbackAuth(agentId, client1.account.address, identityRegistry.address, agentOwner);
+      const feedbackAuth2 = await createFeedbackAuth(agentId, client2.account.address, identityRegistry.address, agentOwner);
+
       // Client 1 gives 2 feedbacks
       await reputationRegistry.write.giveFeedback([
-        agentId, 80, tag1, tag2, "ipfs://f1", keccak256(toHex("c1")), "0x"
-      ]);
+        agentId, 80, tag1, tag2, "ipfs://f1", keccak256(toHex("c1")), feedbackAuth1
+      ], { account: client1.account });
       await reputationRegistry.write.giveFeedback([
-        agentId, 90, tag1, tag2, "ipfs://f2", keccak256(toHex("c2")), "0x"
-      ]);
+        agentId, 90, tag1, tag2, "ipfs://f2", keccak256(toHex("c2")), feedbackAuth1
+      ], { account: client1.account });
 
       // Client 2 gives 1 feedback
       await reputationRegistry.write.giveFeedback(
-        [agentId, 100, tag1, tag2, "ipfs://f3", keccak256(toHex("c3")), "0x"],
+        [agentId, 100, tag1, tag2, "ipfs://f3", keccak256(toHex("c3")), feedbackAuth2],
         { account: client2.account }
       );
 
@@ -519,18 +593,20 @@ describe("ERC8004 Registries", async function () {
         identityRegistry.address,
       ]);
 
-      const [client] = await viem.getWalletClients();
-      await identityRegistry.write.register(["ipfs://agent"]);
+      const [agentOwner, client] = await viem.getWalletClients();
+      await identityRegistry.write.register(["ipfs://agent"], { account: agentOwner.account });
 
       const agentId = 1n;
       const tagA = keccak256(toHex("tagA"));
       const tagB = keccak256(toHex("tagB"));
       const tagC = keccak256(toHex("tagC"));
 
+      const feedbackAuth = await createFeedbackAuth(agentId, client.account.address, identityRegistry.address, agentOwner);
+
       // Give feedbacks with different tags
-      await reputationRegistry.write.giveFeedback([agentId, 80, tagA, tagB, "", "0x0000000000000000000000000000000000000000000000000000000000000000", "0x"]);
-      await reputationRegistry.write.giveFeedback([agentId, 90, tagA, tagC, "", "0x0000000000000000000000000000000000000000000000000000000000000000", "0x"]);
-      await reputationRegistry.write.giveFeedback([agentId, 100, tagB, tagC, "", "0x0000000000000000000000000000000000000000000000000000000000000000", "0x"]);
+      await reputationRegistry.write.giveFeedback([agentId, 80, tagA, tagB, "", "0x0000000000000000000000000000000000000000000000000000000000000000", feedbackAuth], { account: client.account });
+      await reputationRegistry.write.giveFeedback([agentId, 90, tagA, tagC, "", "0x0000000000000000000000000000000000000000000000000000000000000000", feedbackAuth], { account: client.account });
+      await reputationRegistry.write.giveFeedback([agentId, 100, tagB, tagC, "", "0x0000000000000000000000000000000000000000000000000000000000000000", feedbackAuth], { account: client.account });
 
       // Filter by tagA
       const summaryA = await reputationRegistry.read.getSummary([agentId, [client.account.address], tagA, "0x0000000000000000000000000000000000000000000000000000000000000000"]);
@@ -544,19 +620,22 @@ describe("ERC8004 Registries", async function () {
         identityRegistry.address,
       ]);
 
-      const [client1, client2] = await viem.getWalletClients();
-      await identityRegistry.write.register(["ipfs://agent"]);
+      const [agentOwner, client1, client2] = await viem.getWalletClients();
+      await identityRegistry.write.register(["ipfs://agent"], { account: agentOwner.account });
 
       const agentId = 1n;
       const tag1 = keccak256(toHex("quality"));
 
+      const feedbackAuth1 = await createFeedbackAuth(agentId, client1.account.address, identityRegistry.address, agentOwner);
+      const feedbackAuth2 = await createFeedbackAuth(agentId, client2.account.address, identityRegistry.address, agentOwner);
+
       // Client1: 2 feedbacks
-      await reputationRegistry.write.giveFeedback([agentId, 80, tag1, "0x0000000000000000000000000000000000000000000000000000000000000000", "", "0x0000000000000000000000000000000000000000000000000000000000000000", "0x"]);
-      await reputationRegistry.write.giveFeedback([agentId, 90, tag1, "0x0000000000000000000000000000000000000000000000000000000000000000", "", "0x0000000000000000000000000000000000000000000000000000000000000000", "0x"]);
+      await reputationRegistry.write.giveFeedback([agentId, 80, tag1, "0x0000000000000000000000000000000000000000000000000000000000000000", "", "0x0000000000000000000000000000000000000000000000000000000000000000", feedbackAuth1], { account: client1.account });
+      await reputationRegistry.write.giveFeedback([agentId, 90, tag1, "0x0000000000000000000000000000000000000000000000000000000000000000", "", "0x0000000000000000000000000000000000000000000000000000000000000000", feedbackAuth1], { account: client1.account });
 
       // Client2: 1 feedback
       await reputationRegistry.write.giveFeedback(
-        [agentId, 100, tag1, "0x0000000000000000000000000000000000000000000000000000000000000000", "", "0x0000000000000000000000000000000000000000000000000000000000000000", "0x"],
+        [agentId, 100, tag1, "0x0000000000000000000000000000000000000000000000000000000000000000", "", "0x0000000000000000000000000000000000000000000000000000000000000000", feedbackAuth2],
         { account: client2.account }
       );
 
@@ -581,16 +660,17 @@ describe("ERC8004 Registries", async function () {
         identityRegistry.address,
       ]);
 
-      const [client, responder1, responder2] = await viem.getWalletClients();
-      await identityRegistry.write.register(["ipfs://agent"]);
+      const [agentOwner, client, responder1, responder2] = await viem.getWalletClients();
+      await identityRegistry.write.register(["ipfs://agent"], { account: agentOwner.account });
 
       const agentId = 1n;
+      const feedbackAuth = await createFeedbackAuth(agentId, client.account.address, identityRegistry.address, agentOwner);
 
       // Give feedback
       await reputationRegistry.write.giveFeedback([
         agentId, 85, "0x0000000000000000000000000000000000000000000000000000000000000000",
-        "0x0000000000000000000000000000000000000000000000000000000000000000", "", "0x0000000000000000000000000000000000000000000000000000000000000000", "0x"
-      ]);
+        "0x0000000000000000000000000000000000000000000000000000000000000000", "", "0x0000000000000000000000000000000000000000000000000000000000000000", feedbackAuth
+      ], { account: client.account });
 
       // Append 2 responses from different responders (use 1-based index)
       await reputationRegistry.write.appendResponse(
@@ -624,28 +704,32 @@ describe("ERC8004 Registries", async function () {
         identityRegistry.address,
       ]);
 
-      const [client1, client2, client3] = await viem.getWalletClients();
-      await identityRegistry.write.register(["ipfs://agent"]);
+      const [agentOwner, client1, client2, client3] = await viem.getWalletClients();
+      await identityRegistry.write.register(["ipfs://agent"], { account: agentOwner.account });
 
       const agentId = 1n;
+
+      const feedbackAuth1 = await createFeedbackAuth(agentId, client1.account.address, identityRegistry.address, agentOwner);
+      const feedbackAuth2 = await createFeedbackAuth(agentId, client2.account.address, identityRegistry.address, agentOwner);
+      const feedbackAuth3 = await createFeedbackAuth(agentId, client3.account.address, identityRegistry.address, agentOwner);
 
       // Client1 gives feedback
       await reputationRegistry.write.giveFeedback([
         agentId, 80, "0x0000000000000000000000000000000000000000000000000000000000000000",
-        "0x0000000000000000000000000000000000000000000000000000000000000000", "", "0x0000000000000000000000000000000000000000000000000000000000000000", "0x"
-      ]);
+        "0x0000000000000000000000000000000000000000000000000000000000000000", "", "0x0000000000000000000000000000000000000000000000000000000000000000", feedbackAuth1
+      ], { account: client1.account });
 
       // Client2 gives feedback
       await reputationRegistry.write.giveFeedback(
         [agentId, 90, "0x0000000000000000000000000000000000000000000000000000000000000000",
-        "0x0000000000000000000000000000000000000000000000000000000000000000", "", "0x0000000000000000000000000000000000000000000000000000000000000000", "0x"],
+        "0x0000000000000000000000000000000000000000000000000000000000000000", "", "0x0000000000000000000000000000000000000000000000000000000000000000", feedbackAuth2],
         { account: client2.account }
       );
 
       // Client3 gives feedback
       await reputationRegistry.write.giveFeedback(
         [agentId, 95, "0x0000000000000000000000000000000000000000000000000000000000000000",
-        "0x0000000000000000000000000000000000000000000000000000000000000000", "", "0x0000000000000000000000000000000000000000000000000000000000000000", "0x"],
+        "0x0000000000000000000000000000000000000000000000000000000000000000", "", "0x0000000000000000000000000000000000000000000000000000000000000000", feedbackAuth3],
         { account: client3.account }
       );
 
