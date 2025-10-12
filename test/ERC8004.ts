@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { network } from "hardhat";
-import { encodeAbiParameters, encodePacked, getAddress, keccak256, toHex } from "viem";
+import { encodeAbiParameters, getAddress, keccak256, toHex } from "viem";
 
 describe("ERC8004 Registries", async function () {
   const { viem } = await network.connect();
