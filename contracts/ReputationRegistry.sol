@@ -19,7 +19,7 @@ contract ReputationRegistry {
     using ECDSA for bytes32;
     using MessageHashUtils for bytes32;
 
-    address public immutable identityRegistry;
+    address private immutable identityRegistry;
 
     event NewFeedback(
         uint256 indexed agentId,
@@ -27,8 +27,8 @@ contract ReputationRegistry {
         uint8 score,
         bytes32 indexed tag1,
         bytes32 tag2,
-        string fileuri,
-        bytes32 filehash
+        string feedbackUri,
+        bytes32 feedbackHash
     );
 
     event FeedbackRevoked(
@@ -72,6 +72,10 @@ contract ReputationRegistry {
     // agentId => clientAddress => feedbackIndex => responder => response count
     mapping(uint256 => mapping(address => mapping(uint64 => mapping(address => uint64)))) private _responseCount;
 
+    // Track all unique responders for each feedback
+    mapping(uint256 => mapping(address => mapping(uint64 => address[]))) private _responders;
+    mapping(uint256 => mapping(address => mapping(uint64 => mapping(address => bool)))) private _responderExists;
+
     // Track all unique clients that have given feedback for each agent
     mapping(uint256 => address[]) private _clients;
     mapping(uint256 => mapping(address => bool)) private _clientExists;
@@ -90,8 +94,8 @@ contract ReputationRegistry {
         uint8 score,
         bytes32 tag1,
         bytes32 tag2,
-        string calldata fileuri,
-        bytes32 filehash,
+        string calldata feedbackUri,
+        bytes32 feedbackHash,
         bytes calldata feedbackAuth
     ) external {
         require(score <= 100, "score>100");
@@ -100,10 +104,16 @@ contract ReputationRegistry {
         require(_agentExists(agentId), "Agent does not exist");
 
         // Get agent owner
-        address agentOwner = IIdentityRegistry(identityRegistry).ownerOf(agentId);
+        IIdentityRegistry registry = IIdentityRegistry(identityRegistry);
+        address agentOwner = registry.ownerOf(agentId);
 
-        // SECURITY: Prevent self-feedback
-        require(msg.sender != agentOwner, "Self-feedback not allowed");
+        // SECURITY: Prevent self-feedback from owner and operators
+        require(
+            msg.sender != agentOwner &&
+            !registry.isApprovedForAll(agentOwner, msg.sender) &&
+            registry.getApproved(agentId) != msg.sender,
+            "Self-feedback not allowed"
+        );
 
         // Verify feedbackAuth signature
         _verifyFeedbackAuth(agentId, msg.sender, feedbackAuth);
@@ -128,7 +138,7 @@ contract ReputationRegistry {
             _clientExists[agentId][msg.sender] = true;
         }
 
-        emit NewFeedback(agentId, msg.sender, score, tag1, tag2, fileuri, filehash);
+        emit NewFeedback(agentId, msg.sender, score, tag1, tag2, feedbackUri, feedbackHash);
     }
 
     function _verifyFeedbackAuth(
@@ -226,6 +236,12 @@ contract ReputationRegistry {
         require(feedbackIndex <= _lastIndex[agentId][clientAddress], "index out of bounds");
         require(bytes(responseUri).length > 0, "Empty URI");
 
+        // Track new responder
+        if (!_responderExists[agentId][clientAddress][feedbackIndex][msg.sender]) {
+            _responders[agentId][clientAddress][feedbackIndex].push(msg.sender);
+            _responderExists[agentId][clientAddress][feedbackIndex][msg.sender] = true;
+        }
+
         // Increment response count for this responder
         _responseCount[agentId][clientAddress][feedbackIndex][msg.sender]++;
 
@@ -253,36 +269,30 @@ contract ReputationRegistry {
         bytes32 tag1,
         bytes32 tag2
     ) external view returns (uint64 count, uint8 averageScore) {
-        address[] memory clients;
+        address[] memory clientList;
         if (clientAddresses.length > 0) {
-            clients = clientAddresses;
+            clientList = clientAddresses;
         } else {
-            clients = _clients[agentId];
+            clientList = _clients[agentId];
         }
 
         uint256 totalScore = 0;
-        uint64 validCount = 0;
+        count = 0;
 
-        for (uint256 i = 0; i < clients.length; i++) {
-            uint64 lastIdx = _lastIndex[agentId][clients[i]];
-
+        for (uint256 i = 0; i < clientList.length; i++) {
+            uint64 lastIdx = _lastIndex[agentId][clientList[i]];
             for (uint64 j = 1; j <= lastIdx; j++) {
-                Feedback storage fb = _feedback[agentId][clients[i]][j];
-
-                // Skip revoked feedback
+                Feedback storage fb = _feedback[agentId][clientList[i]][j];
                 if (fb.isRevoked) continue;
-
-                // Apply tag filters
                 if (tag1 != bytes32(0) && fb.tag1 != tag1) continue;
                 if (tag2 != bytes32(0) && fb.tag2 != tag2) continue;
 
                 totalScore += fb.score;
-                validCount++;
+                count++;
             }
         }
 
-        count = validCount;
-        averageScore = validCount > 0 ? uint8(totalScore / validCount) : 0;
+        averageScore = count > 0 ? uint8(totalScore / count) : 0;
     }
 
     function readAllFeedback(
@@ -305,38 +315,8 @@ contract ReputationRegistry {
             clientList = _clients[agentId];
         }
 
-        // Count and populate in a single optimized pass
-        uint256 totalCount = _countValidFeedback(agentId, clientList, tag1, tag2, includeRevoked);
-
-        // Initialize arrays
-        clients = new address[](totalCount);
-        scores = new uint8[](totalCount);
-        tag1s = new bytes32[](totalCount);
-        tag2s = new bytes32[](totalCount);
-        revokedStatuses = new bool[](totalCount);
-
-        // Populate arrays
-        _populateFeedbackArrays(
-            agentId,
-            clientList,
-            tag1,
-            tag2,
-            includeRevoked,
-            clients,
-            scores,
-            tag1s,
-            tag2s,
-            revokedStatuses
-        );
-    }
-
-    function _countValidFeedback(
-        uint256 agentId,
-        address[] memory clientList,
-        bytes32 tag1,
-        bytes32 tag2,
-        bool includeRevoked
-    ) internal view returns (uint256 totalCount) {
+        // First pass: count matching feedback
+        uint256 totalCount = 0;
         for (uint256 i = 0; i < clientList.length; i++) {
             uint64 lastIdx = _lastIndex[agentId][clientList[i]];
             for (uint64 j = 1; j <= lastIdx; j++) {
@@ -347,20 +327,15 @@ contract ReputationRegistry {
                 totalCount++;
             }
         }
-    }
 
-    function _populateFeedbackArrays(
-        uint256 agentId,
-        address[] memory clientList,
-        bytes32 tag1,
-        bytes32 tag2,
-        bool includeRevoked,
-        address[] memory clients,
-        uint8[] memory scores,
-        bytes32[] memory tag1s,
-        bytes32[] memory tag2s,
-        bool[] memory revokedStatuses
-    ) internal view {
+        // Initialize arrays
+        clients = new address[](totalCount);
+        scores = new uint8[](totalCount);
+        tag1s = new bytes32[](totalCount);
+        tag2s = new bytes32[](totalCount);
+        revokedStatuses = new bool[](totalCount);
+
+        // Second pass: populate arrays
         uint256 idx = 0;
         for (uint256 i = 0; i < clientList.length; i++) {
             uint64 lastIdx = _lastIndex[agentId][clientList[i]];
@@ -386,32 +361,41 @@ contract ReputationRegistry {
         uint64 feedbackIndex,
         address[] calldata responders
     ) external view returns (uint64 count) {
-        // Early return if no responders specified (known limitation)
-        if (responders.length == 0) {
-            return 0;
-        }
-
         if (clientAddress == address(0)) {
-            // Count all responses for all clients from specified responders
+            // Count all responses for all clients
             address[] memory clients = _clients[agentId];
             for (uint256 i = 0; i < clients.length; i++) {
                 uint64 lastIdx = _lastIndex[agentId][clients[i]];
                 for (uint64 j = 1; j <= lastIdx; j++) {
-                    for (uint256 k = 0; k < responders.length; k++) {
-                        count += _responseCount[agentId][clients[i]][j][responders[k]];
-                    }
+                    count += _countResponses(agentId, clients[i], j, responders);
                 }
             }
         } else if (feedbackIndex == 0) {
-            // Count all responses for specific client from specified responders
+            // Count all responses for specific clientAddress
             uint64 lastIdx = _lastIndex[agentId][clientAddress];
             for (uint64 j = 1; j <= lastIdx; j++) {
-                for (uint256 k = 0; k < responders.length; k++) {
-                    count += _responseCount[agentId][clientAddress][j][responders[k]];
-                }
+                count += _countResponses(agentId, clientAddress, j, responders);
             }
         } else {
-            // Count responses for specific feedback from specified responders
+            // Count responses for specific clientAddress and feedbackIndex
+            count = _countResponses(agentId, clientAddress, feedbackIndex, responders);
+        }
+    }
+
+    function _countResponses(
+        uint256 agentId,
+        address clientAddress,
+        uint64 feedbackIndex,
+        address[] calldata responders
+    ) internal view returns (uint64 count) {
+        if (responders.length == 0) {
+            // Count from all responders
+            address[] memory allResponders = _responders[agentId][clientAddress][feedbackIndex];
+            for (uint256 k = 0; k < allResponders.length; k++) {
+                count += _responseCount[agentId][clientAddress][feedbackIndex][allResponders[k]];
+            }
+        } else {
+            // Count from specified responders
             for (uint256 k = 0; k < responders.length; k++) {
                 count += _responseCount[agentId][clientAddress][feedbackIndex][responders[k]];
             }

@@ -128,7 +128,7 @@ describe("ERC8004 Registries", async function () {
 
       // Update tokenURI
       const newUri = "https://example.com/updated-agent.json";
-      await identityRegistry.write.setTokenURI([agentId, newUri]);
+      await identityRegistry.write.setAgentUri([agentId, newUri]);
 
       // Verify updated URI
       const updatedUri = await identityRegistry.read.tokenURI([agentId]);
@@ -242,7 +242,7 @@ describe("ERC8004 Registries", async function () {
       assert.equal(initialUri, "");
 
       // Set tokenURI later
-      await identityRegistry.write.setTokenURI([agentId, "ipfs://later-set-uri"]);
+      await identityRegistry.write.setAgentUri([agentId, "ipfs://later-set-uri"]);
       const updatedUri = await identityRegistry.read.tokenURI([agentId]);
       assert.equal(updatedUri, "ipfs://later-set-uri");
     });
@@ -1216,11 +1216,10 @@ describe("ERC8004 Registries", async function () {
       );
 
       // Check status was created
-      const status = await validationRegistry.read.status([requestHash]);
+      const status = await validationRegistry.read.validations([requestHash]);
       assert.equal(status[0].toLowerCase(), validator.account.address.toLowerCase()); // validatorAddress
       assert.equal(status[1], agentId); // agentId
       assert.equal(status[2], 0); // response (initial)
-      assert.equal(status[5], true); // exists
     });
 
     it("Should submit validation response", async function () {
@@ -1255,15 +1254,16 @@ describe("ERC8004 Registries", async function () {
         ),
         validationRegistry,
         "ValidationResponse",
-        [getAddress(validator.account.address), agentId, requestHash, response, responseUri, tag]
+        [getAddress(validator.account.address), agentId, requestHash, response, responseUri, responseHash, tag]
       );
 
-      // Check status was updated
+      // Check status was updated (now returns responseHash too)
       const statusResult = await validationRegistry.read.getValidationStatus([requestHash]);
       assert.equal(statusResult[0].toLowerCase(), validator.account.address.toLowerCase());
       assert.equal(statusResult[1], agentId);
       assert.equal(statusResult[2], response);
-      assert.equal(statusResult[3], tag);
+      assert.equal(statusResult[3], responseHash); // responseHash
+      assert.equal(statusResult[4], tag); // tag
     });
 
     it("Should reject duplicate validation requests", async function () {
@@ -1461,7 +1461,7 @@ describe("ERC8004 Registries", async function () {
       // Check first response
       let status = await validationRegistry.read.getValidationStatus([requestHash]);
       assert.equal(status[2], 80); // response
-      assert.equal(status[3], softFinalityTag); // tag
+      assert.equal(status[4], softFinalityTag); // tag (responseHash is at [3])
 
       // Second response - hard finality (update)
       const hardFinalityTag = keccak256(toHex("hard_finality"));
@@ -1473,7 +1473,7 @@ describe("ERC8004 Registries", async function () {
       // Check updated response
       status = await validationRegistry.read.getValidationStatus([requestHash]);
       assert.equal(status[2], 100); // updated response
-      assert.equal(status[3], hardFinalityTag); // updated tag
+      assert.equal(status[4], hardFinalityTag); // updated tag (responseHash is at [3])
     });
 
     /**

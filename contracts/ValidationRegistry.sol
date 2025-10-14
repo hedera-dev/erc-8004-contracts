@@ -10,7 +10,7 @@ interface IIdentityRegistry {
 /// - Stores identityRegistry address
 /// - Allows requests & responses, emits events
 contract ValidationRegistry {
-    address public immutable identityRegistry;
+    address private immutable identityRegistry;
 
     event ValidationRequest(
         address indexed validatorAddress,
@@ -25,6 +25,7 @@ contract ValidationRegistry {
         bytes32 indexed requestHash,
         uint8 response,
         string responseUri,
+        bytes32 responseHash,
         bytes32 tag
     );
 
@@ -34,12 +35,11 @@ contract ValidationRegistry {
         uint8 response;       // 0..100
         bytes32 responseHash;
         bytes32 tag;
-        bool exists;
         uint256 lastUpdate;
     }
 
-    // requestHash => status
-    mapping(bytes32 => ValidationStatus) public status;
+    // requestHash => validation status
+    mapping(bytes32 => ValidationStatus) public validations;
 
     // agentId => list of requestHashes
     mapping(uint256 => bytes32[]) private _agentValidations;
@@ -63,7 +63,7 @@ contract ValidationRegistry {
         bytes32 requestHash
     ) external {
         require(validatorAddress != address(0), "bad validator");
-        require(!status[requestHash].exists, "exists");
+        require(validations[requestHash].validatorAddress == address(0), "exists");
 
         // Check permission: caller must be owner or approved operator
         IIdentityRegistry registry = IIdentityRegistry(identityRegistry);
@@ -73,13 +73,12 @@ contract ValidationRegistry {
             "Not authorized"
         );
 
-        status[requestHash] = ValidationStatus({
+        validations[requestHash] = ValidationStatus({
             validatorAddress: validatorAddress,
             agentId: agentId,
             response: 0,
             responseHash: bytes32(0),
             tag: bytes32(0),
-            exists: true,
             lastUpdate: block.timestamp
         });
 
@@ -97,25 +96,25 @@ contract ValidationRegistry {
         bytes32 responseHash,
         bytes32 tag
     ) external {
-        ValidationStatus storage s = status[requestHash];
-        require(s.exists, "unknown");
+        ValidationStatus storage s = validations[requestHash];
+        require(s.validatorAddress != address(0), "unknown");
         require(msg.sender == s.validatorAddress, "not validator");
         require(response <= 100, "resp>100");
         s.response = response;
         s.responseHash = responseHash;
         s.tag = tag;
         s.lastUpdate = block.timestamp;
-        emit ValidationResponse(s.validatorAddress, s.agentId, requestHash, response, responseUri, tag);
+        emit ValidationResponse(s.validatorAddress, s.agentId, requestHash, response, responseUri, responseHash, tag);
     }
 
     function getValidationStatus(bytes32 requestHash)
         external
         view
-        returns (address validatorAddress, uint256 agentId, uint8 response, bytes32 tag, uint256 lastUpdate)
+        returns (address validatorAddress, uint256 agentId, uint8 response, bytes32 responseHash, bytes32 tag, uint256 lastUpdate)
     {
-        ValidationStatus memory s = status[requestHash];
-        require(s.exists, "unknown");
-        return (s.validatorAddress, s.agentId, s.response, s.tag, s.lastUpdate);
+        ValidationStatus memory s = validations[requestHash];
+        require(s.validatorAddress != address(0), "unknown");
+        return (s.validatorAddress, s.agentId, s.response, s.responseHash, s.tag, s.lastUpdate);
     }
 
     function getSummary(
@@ -129,7 +128,7 @@ contract ValidationRegistry {
         bytes32[] storage requestHashes = _agentValidations[agentId];
 
         for (uint256 i = 0; i < requestHashes.length; i++) {
-            ValidationStatus storage s = status[requestHashes[i]];
+            ValidationStatus storage s = validations[requestHashes[i]];
 
             // Filter by validator if specified
             bool matchValidator = (validatorAddresses.length == 0);
@@ -145,7 +144,7 @@ contract ValidationRegistry {
             // Filter by tag (0x0 means no filter)
             bool matchTag = (tag == bytes32(0)) || (s.tag == tag);
 
-            if (matchValidator && matchTag && s.response > 0) {
+            if (matchValidator && matchTag && s.response >= 0) {
                 totalResponse += s.response;
                 count++;
             }

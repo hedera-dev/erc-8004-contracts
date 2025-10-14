@@ -5,7 +5,7 @@ import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 contract IdentityRegistry is ERC721URIStorage, Ownable {
-    uint256 private _nextId = 0;
+    uint256 private _lastId = 0;
 
     // agentId => key => value
     mapping(uint256 => mapping(string => bytes)) private _metadata;
@@ -17,27 +17,28 @@ contract IdentityRegistry is ERC721URIStorage, Ownable {
 
     event Registered(uint256 indexed agentId, string tokenURI, address indexed owner);
     event MetadataSet(uint256 indexed agentId, string indexed indexedKey, string key, bytes value);
+    event UriUpdated(uint256 indexed agentId, string newUri, address indexed updatedBy);
 
     constructor() ERC721("AgentIdentity", "AID") Ownable(msg.sender) {}
 
     function register() external returns (uint256 agentId) {
-        agentId = _nextId++;
+        agentId = _lastId++;
         _safeMint(msg.sender, agentId);
         emit Registered(agentId, "", msg.sender);
     }
 
-    function register(string memory tokenURI) external returns (uint256 agentId) {
-        agentId = _nextId++;
+    function register(string memory tokenUri) external returns (uint256 agentId) {
+        agentId = _lastId++;
         _safeMint(msg.sender, agentId);
-        _setTokenURI(agentId, tokenURI);
-        emit Registered(agentId, tokenURI, msg.sender);
+        _setTokenURI(agentId, tokenUri);
+        emit Registered(agentId, tokenUri, msg.sender);
     }
 
-    function register(string memory tokenURI, MetadataEntry[] memory metadata) external returns (uint256 agentId) {
-        agentId = _nextId++;
+    function register(string memory tokenUri, MetadataEntry[] memory metadata) external returns (uint256 agentId) {
+        agentId = _lastId++;
         _safeMint(msg.sender, agentId);
-        _setTokenURI(agentId, tokenURI);
-        emit Registered(agentId, tokenURI, msg.sender);
+        _setTokenURI(agentId, tokenUri);
+        emit Registered(agentId, tokenUri, msg.sender);
 
         for (uint256 i = 0; i < metadata.length; i++) {
             _metadata[agentId][metadata[i].key] = metadata[i].value;
@@ -60,16 +61,16 @@ contract IdentityRegistry is ERC721URIStorage, Ownable {
         emit MetadataSet(agentId, key, key, value);
     }
 
-    function setTokenURI(uint256 agentId, string calldata newURI) external {
+    function setAgentUri(uint256 agentId, string calldata newUri) external {
         address owner = ownerOf(agentId);
         require(
             msg.sender == owner ||
             isApprovedForAll(owner, msg.sender) ||
-            msg.sender == getApproved(agentId), // optional: per-token approval
+            msg.sender == getApproved(agentId),
             "Not authorized"
         );
-        _setTokenURI(agentId, newURI);
-        // (No new event required by spec; Registered is only for minting.)
+        _setTokenURI(agentId, newUri);
+        emit UriUpdated(agentId, newUri, msg.sender);
     }
 }
 
