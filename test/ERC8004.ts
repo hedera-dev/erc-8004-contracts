@@ -1187,6 +1187,356 @@ describe("ERC8004 Registries", async function () {
         )
       );
     });
+
+    /**
+     * EIP-1271 Smart Contract Wallet Tests
+     * "signed using EIP-191 or ERC-1271 (if clientAddress is a smart contract)"
+     */
+    describe("EIP-1271 Support", async function () {
+      it("Should accept feedbackAuth signed by ERC-1271 smart contract wallet", async function () {
+        const identityRegistry = await viem.deployContract("IdentityRegistry");
+        const reputationRegistry = await viem.deployContract("ReputationRegistry", [
+          identityRegistry.address,
+        ]);
+
+        const [agentOwner, walletOwner, client] = await viem.getWalletClients();
+
+        // Deploy agent with agentOwner
+        const txHash = await identityRegistry.write.register(["ipfs://agent"], { account: agentOwner.account });
+        const agentId = await getAgentIdFromRegistration(txHash);
+
+        // Deploy ERC-1271 wallet owned by walletOwner
+        const erc1271Wallet = await viem.deployContract("MockERC1271Wallet", [walletOwner.account.address]);
+
+        // Transfer agent ownership to the smart contract wallet
+        await identityRegistry.write.transferFrom(
+          [agentOwner.account.address, erc1271Wallet.address, agentId],
+          { account: agentOwner.account }
+        );
+
+        // Verify wallet now owns the agent
+        const newOwner = await identityRegistry.read.ownerOf([agentId]);
+        assert.equal(newOwner.toLowerCase(), erc1271Wallet.address.toLowerCase());
+
+        // Prepare feedbackAuth parameters
+        const chainId = BigInt(await publicClient.getChainId());
+        const indexLimit = 10n;
+        const expiry = BigInt(Math.floor(Date.now() / 1000) + 3600);
+
+        // Construct message to sign
+        const messageHash = keccak256(
+          encodeAbiParameters(
+            [
+              { type: "uint256" },
+              { type: "address" },
+              { type: "uint64" },
+              { type: "uint256" },
+              { type: "uint256" },
+              { type: "address" },
+              { type: "address" }
+            ],
+            [agentId, client.account.address, indexLimit, expiry, chainId, identityRegistry.address, erc1271Wallet.address]
+          )
+        );
+
+        // Sign with wallet owner's private key (wallet will validate this via ERC-1271)
+        const signature = await walletOwner.signMessage({
+          message: { raw: messageHash }
+        });
+
+        // Construct feedbackAuth with smart contract wallet as signer
+        const feedbackAuthEncoded = encodeAbiParameters(
+          [
+            { type: "uint256" },
+            { type: "address" },
+            { type: "uint64" },
+            { type: "uint256" },
+            { type: "uint256" },
+            { type: "address" },
+            { type: "address" }
+          ],
+          [agentId, client.account.address, indexLimit, expiry, chainId, identityRegistry.address, erc1271Wallet.address]
+        );
+        const feedbackAuth = (feedbackAuthEncoded + signature.slice(2)) as `0x${string}`;
+
+        // Give feedback - should succeed with ERC-1271 validation
+        await reputationRegistry.write.giveFeedback(
+          [
+            agentId,
+            92,
+            keccak256(toHex("erc1271")),
+            keccak256(toHex("test")),
+            "ipfs://erc1271-feedback",
+            keccak256(toHex("erc1271-content")),
+            feedbackAuth
+          ],
+          { account: client.account }
+        );
+
+        // Verify feedback was recorded
+        const feedback = await reputationRegistry.read.readFeedback([agentId, client.account.address, 1n]);
+        assert.equal(feedback[0], 92);
+        assert.equal(feedback[1], keccak256(toHex("erc1271")));
+      });
+
+      it("Should reject feedbackAuth with invalid ERC-1271 signature", async function () {
+        const identityRegistry = await viem.deployContract("IdentityRegistry");
+        const reputationRegistry = await viem.deployContract("ReputationRegistry", [
+          identityRegistry.address,
+        ]);
+
+        const [agentOwner, walletOwner, client, attacker] = await viem.getWalletClients();
+
+        // Deploy agent
+        const txHash = await identityRegistry.write.register(["ipfs://agent"], { account: agentOwner.account });
+        const agentId = await getAgentIdFromRegistration(txHash);
+
+        // Deploy ERC-1271 wallet owned by walletOwner
+        const erc1271Wallet = await viem.deployContract("MockERC1271Wallet", [walletOwner.account.address]);
+
+        // Transfer agent to wallet
+        await identityRegistry.write.transferFrom(
+          [agentOwner.account.address, erc1271Wallet.address, agentId],
+          { account: agentOwner.account }
+        );
+
+        const chainId = BigInt(await publicClient.getChainId());
+        const indexLimit = 10n;
+        const expiry = BigInt(Math.floor(Date.now() / 1000) + 3600);
+
+        const messageHash = keccak256(
+          encodeAbiParameters(
+            [
+              { type: "uint256" },
+              { type: "address" },
+              { type: "uint64" },
+              { type: "uint256" },
+              { type: "uint256" },
+              { type: "address" },
+              { type: "address" }
+            ],
+            [agentId, client.account.address, indexLimit, expiry, chainId, identityRegistry.address, erc1271Wallet.address]
+          )
+        );
+
+        // Sign with ATTACKER's key (not the wallet owner)
+        const badSignature = await attacker.signMessage({
+          message: { raw: messageHash }
+        });
+
+        const feedbackAuthEncoded = encodeAbiParameters(
+          [
+            { type: "uint256" },
+            { type: "address" },
+            { type: "uint64" },
+            { type: "uint256" },
+            { type: "uint256" },
+            { type: "address" },
+            { type: "address" }
+          ],
+          [agentId, client.account.address, indexLimit, expiry, chainId, identityRegistry.address, erc1271Wallet.address]
+        );
+        const feedbackAuth = (feedbackAuthEncoded + badSignature.slice(2)) as `0x${string}`;
+
+        // Should reject - wallet will return invalid magic value
+        await assert.rejects(
+          reputationRegistry.write.giveFeedback(
+            [
+              agentId,
+              92,
+              keccak256(toHex("erc1271")),
+              keccak256(toHex("test")),
+              "ipfs://feedback",
+              keccak256(toHex("content")),
+              feedbackAuth
+            ],
+            { account: client.account }
+          )
+        );
+      });
+
+      it("Should accept feedbackAuth from ERC-1271 wallet with approved operator", async function () {
+        const identityRegistry = await viem.deployContract("IdentityRegistry");
+        const reputationRegistry = await viem.deployContract("ReputationRegistry", [
+          identityRegistry.address,
+        ]);
+
+        const [agentOwner, walletOwner, client, operator] = await viem.getWalletClients();
+
+        // Deploy agent
+        const txHash = await identityRegistry.write.register(["ipfs://agent"], { account: agentOwner.account });
+        const agentId = await getAgentIdFromRegistration(txHash);
+
+        // Deploy ERC-1271 wallet and transfer agent ownership
+        const erc1271Wallet = await viem.deployContract("MockERC1271Wallet", [walletOwner.account.address]);
+        await identityRegistry.write.transferFrom(
+          [agentOwner.account.address, erc1271Wallet.address, agentId],
+          { account: agentOwner.account }
+        );
+
+        // Wallet approves operator (using signTypedData or similar in real scenario)
+        // For this test, we'll have walletOwner sign as if they're the operator
+        const chainId = BigInt(await publicClient.getChainId());
+        const indexLimit = 10n;
+        const expiry = BigInt(Math.floor(Date.now() / 1000) + 3600);
+
+        const messageHash = keccak256(
+          encodeAbiParameters(
+            [
+              { type: "uint256" },
+              { type: "address" },
+              { type: "uint64" },
+              { type: "uint256" },
+              { type: "uint256" },
+              { type: "address" },
+              { type: "address" }
+            ],
+            [agentId, client.account.address, indexLimit, expiry, chainId, identityRegistry.address, erc1271Wallet.address]
+          )
+        );
+
+        const signature = await walletOwner.signMessage({
+          message: { raw: messageHash }
+        });
+
+        const feedbackAuthEncoded = encodeAbiParameters(
+          [
+            { type: "uint256" },
+            { type: "address" },
+            { type: "uint64" },
+            { type: "uint256" },
+            { type: "uint256" },
+            { type: "address" },
+            { type: "address" }
+          ],
+          [agentId, client.account.address, indexLimit, expiry, chainId, identityRegistry.address, erc1271Wallet.address]
+        );
+        const feedbackAuth = (feedbackAuthEncoded + signature.slice(2)) as `0x${string}`;
+
+        // Should succeed
+        await reputationRegistry.write.giveFeedback(
+          [
+            agentId,
+            88,
+            keccak256(toHex("wallet")),
+            keccak256(toHex("operator")),
+            "ipfs://feedback",
+            keccak256(toHex("content")),
+            feedbackAuth
+          ],
+          { account: client.account }
+        );
+
+        const feedback = await reputationRegistry.read.readFeedback([agentId, client.account.address, 1n]);
+        assert.equal(feedback[0], 88);
+      });
+
+      it("Should handle multiple feedbacks with ERC-1271 wallet signer", async function () {
+        const identityRegistry = await viem.deployContract("IdentityRegistry");
+        const reputationRegistry = await viem.deployContract("ReputationRegistry", [
+          identityRegistry.address,
+        ]);
+
+        const [agentOwner, walletOwner, client1, client2] = await viem.getWalletClients();
+
+        // Deploy agent
+        const txHash = await identityRegistry.write.register(["ipfs://agent"], { account: agentOwner.account });
+        const agentId = await getAgentIdFromRegistration(txHash);
+
+        // Deploy ERC-1271 wallet
+        const erc1271Wallet = await viem.deployContract("MockERC1271Wallet", [walletOwner.account.address]);
+        await identityRegistry.write.transferFrom(
+          [agentOwner.account.address, erc1271Wallet.address, agentId],
+          { account: agentOwner.account }
+        );
+
+        const chainId = BigInt(await publicClient.getChainId());
+        const indexLimit = 100n;
+        const expiry = BigInt(Math.floor(Date.now() / 1000) + 3600);
+
+        // Create feedbackAuth for client1
+        const messageHash1 = keccak256(
+          encodeAbiParameters(
+            [
+              { type: "uint256" },
+              { type: "address" },
+              { type: "uint64" },
+              { type: "uint256" },
+              { type: "uint256" },
+              { type: "address" },
+              { type: "address" }
+            ],
+            [agentId, client1.account.address, indexLimit, expiry, chainId, identityRegistry.address, erc1271Wallet.address]
+          )
+        );
+
+        const signature1 = await walletOwner.signMessage({ message: { raw: messageHash1 } });
+        const feedbackAuth1 = (encodeAbiParameters(
+          [
+            { type: "uint256" },
+            { type: "address" },
+            { type: "uint64" },
+            { type: "uint256" },
+            { type: "uint256" },
+            { type: "address" },
+            { type: "address" }
+          ],
+          [agentId, client1.account.address, indexLimit, expiry, chainId, identityRegistry.address, erc1271Wallet.address]
+        ) + signature1.slice(2)) as `0x${string}`;
+
+        // Create feedbackAuth for client2
+        const messageHash2 = keccak256(
+          encodeAbiParameters(
+            [
+              { type: "uint256" },
+              { type: "address" },
+              { type: "uint64" },
+              { type: "uint256" },
+              { type: "uint256" },
+              { type: "address" },
+              { type: "address" }
+            ],
+            [agentId, client2.account.address, indexLimit, expiry, chainId, identityRegistry.address, erc1271Wallet.address]
+          )
+        );
+
+        const signature2 = await walletOwner.signMessage({ message: { raw: messageHash2 } });
+        const feedbackAuth2 = (encodeAbiParameters(
+          [
+            { type: "uint256" },
+            { type: "address" },
+            { type: "uint64" },
+            { type: "uint256" },
+            { type: "uint256" },
+            { type: "address" },
+            { type: "address" }
+          ],
+          [agentId, client2.account.address, indexLimit, expiry, chainId, identityRegistry.address, erc1271Wallet.address]
+        ) + signature2.slice(2)) as `0x${string}`;
+
+        // Give feedback from both clients
+        await reputationRegistry.write.giveFeedback(
+          [agentId, 85, keccak256(toHex("tag1")), keccak256(toHex("tag2")), "ipfs://f1", keccak256(toHex("c1")), feedbackAuth1],
+          { account: client1.account }
+        );
+
+        await reputationRegistry.write.giveFeedback(
+          [agentId, 95, keccak256(toHex("tag1")), keccak256(toHex("tag2")), "ipfs://f2", keccak256(toHex("c2")), feedbackAuth2],
+          { account: client2.account }
+        );
+
+        // Verify summary
+        const summary = await reputationRegistry.read.getSummary([
+          agentId,
+          [client1.account.address, client2.account.address],
+          "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "0x0000000000000000000000000000000000000000000000000000000000000000"
+        ]);
+
+        assert.equal(summary[0], 2n); // count
+        assert.equal(summary[1], 90); // average = (85 + 95) / 2
+      });
+    });
   });
 
   describe("ValidationRegistry", async function () {
