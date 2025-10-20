@@ -40,7 +40,7 @@ const config: HardhatUserConfig = {
       type: "edr-simulated",
       chainType: "op",
     },
-    hedera: {
+    hederaTestnet: {
       type: "http",
       chainType: "l1",
       url: configVariable("HEDERA_RPC_URL"),

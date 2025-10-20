@@ -10,9 +10,9 @@
     "local": "npx hardhat node",
     "deploy": "npx hardhat ignition deploy ./ignition/modules/ERC8004.ts --network localhost",
     "deploy:upgradeable": "npx hardhat run scripts/deploy-upgradeable.ts --network localhost",
-    "deploy:upgradeable:sepolia": "npx hardhat run scripts/deploy-upgradeable.ts --network sepolia",
+    "deploy:upgradeable:hederaTestnet": "npx hardhat run scripts/deploy-upgradeable.ts --network hederaTestnet",
     "upgrade": "npx hardhat run scripts/upgrade-contracts.ts --network localhost",
-    "upgrade:sepolia": "npx hardhat run scripts/upgrade-contracts.ts --network sepolia"
+    "upgrade:hederaTestnet": "npx hardhat run scripts/upgrade-contracts.ts --network hederaTestnet"
   },
   "keywords": [],
   "author": "",
