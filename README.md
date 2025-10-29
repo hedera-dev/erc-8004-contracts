@@ -19,6 +19,11 @@ Implementation of the ERC-8004 protocol for agent discovery and trust through re
 - **ReputationRegistry**: `0x8004bd8483b99310df121c46ED8858616b2Bba02`
 - **ValidationRegistry**: `0x8004c44d1EFdd699B2A26e781eF7F77c56A9a4EB`
 
+#### Polygon Amoy
+- **IdentityRegistry**: `0x8004ad19E14B9e0654f73353e8a0B600D46C2898`
+- **ReputationRegistry**: `0x8004B12F4C2B42d00c46479e859C92e39044C930`
+- **ValidationRegistry**: `0x8004C11C213ff7BaD36489bcBDF947ba5eee289B`
+
 #### Hedera Testnet
 - **IdentityRegistry**: `0x4c74ebd72921d537159ed2053f46c12a7d8e5923`
 - **ReputationRegistry**: `0xc565edcba77e3abeade40bfd6cf6bf583b3293e0`
